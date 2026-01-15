@@ -121,17 +121,17 @@ jobs:
     with:
       version: "${{ inputs.version }}"
 
-  deploy-python-package:
-    name: Deploy Python Package (PyPI)
-    uses: ./.github/workflows/deploy-package-action.yml
-    if: ${{ inputs.release && success() }}
-    needs:
-      - deploy-python-package-test-pypi
-    secrets:
-      PYPI_API_TOKEN: "${{ secrets.PYPI_API_TOKEN }}"
-    with:
-      test: false
-      version: "${{ inputs.version }}"
+  # deploy-python-package:
+  #   name: Deploy Python Package (PyPI)
+  #   uses: ./.github/workflows/deploy-package-action.yml
+  #   if: ${{ inputs.release && success() }}
+  #   needs:
+  #     - deploy-python-package-test-pypi
+  #   secrets:
+  #     PYPI_API_TOKEN: "${{ secrets.PYPI_API_TOKEN }}"
+  #   with:
+  #     test: false
+  #     version: "${{ inputs.version }}"
 
   set-pipeline-exit-status:
     # This step is just so we can make github require this step, to pass checks
@@ -145,7 +145,7 @@ jobs:
       - deploy-docs
       - build-python-package
       - deploy-python-package-test-pypi
-      - deploy-python-package
+      # - deploy-python-package
 
     steps:
       - name: Download Exit Status Files
