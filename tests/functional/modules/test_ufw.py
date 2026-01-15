@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+from salt.exceptions import CommandExecutionError
 
 pytestmark = [
     pytest.mark.skip_if_binaries_missing("ufw"),
@@ -156,3 +157,22 @@ def test_remove_rule(ufw, ufw_client):
     rules_after = ufw_client.get_current_rules()
     rules_after = rules_after.splitlines()
     assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in" not in rules_after
+
+
+def test_ports_with_app_raise_error(ufw):
+    with pytest.raises(CommandExecutionError):
+        ufw.add_rule(
+            action="allow",
+            to_port="25000",
+            app="SomeApp",
+            direction="in",
+        )
+
+
+def test_app_without_ips_raise_error(ufw):
+    with pytest.raises(CommandExecutionError):
+        ufw.add_rule(
+            action="allow",
+            app="SomeApp",
+            direction="in",
+        )
