@@ -59,6 +59,21 @@ def test_logging_level(ufw):
     assert status.get("logging") == "off"
 
 
+def test_reset(ufw, ufw_client):
+    ufw.add_rule(
+        action="allow",
+        direction="in",
+        to_port="25000",
+        proto="tcp",
+    )
+    rules_before_reset = ufw_client.get_current_rules()
+    assert len(rules_before_reset.strip().splitlines()) > 0
+
+    ufw.reset()
+    rules_after_reset = ufw_client.get_current_rules()
+    assert rules_after_reset.strip() == ""
+
+
 def test_add_rule_port(ufw, ufw_client):
     # Add a rule to allow port
     ret = ufw.add_rule(

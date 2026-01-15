@@ -212,6 +212,27 @@ def version():
         return False
 
 
+def reset():
+    """
+    Reset UFW to default state.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' ufw.reset
+    """
+    client = get_client()
+    try:
+        result = client.execute("reset", force=True)
+        if isinstance(result, dict):
+            return result["stdout"].strip()
+        return result
+    except UFWCommandError as err:
+        log.error("Failed to reset UFW! %s: %s", type(err).__name__, err)
+        return False
+
+
 def add_rule(
     insert=None,
     action="allow",
