@@ -38,7 +38,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
       - name: Create GitHub Release
-        # if: ${{ !inputs.test }}
+        if: ${{ !inputs.test }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
