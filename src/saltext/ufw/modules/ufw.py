@@ -90,6 +90,10 @@ def status(numbered=False, raw=False):
     client = get_client()
     cmd = "status"
 
+    # If numbered is True, set raw to True to get the raw output
+    if numbered:
+        raw = True
+
     try:
         result = client.execute(cmd, extended="verbose" if not numbered else "numbered")
         if isinstance(result, dict):
