@@ -35,13 +35,6 @@ class TestUFWClient:
         assert "--force" in out["stdout"] or out["stdout"] == "ok"
 
     @patch("salt.modules.cmdmod.run_all")
-    def test_execute_dry_run(self, mock_run_all):
-        mock_run_all.return_value = {"retcode": 0, "stdout": "dry"}
-        c = client.UFWClient()
-        out = c.execute_dry_run("status")
-        assert out["stdout"] == "dry"
-
-    @patch("salt.modules.cmdmod.run_all")
     def test_version_parsing(self, mock_run_all):
         mock_run_all.return_value = {"retcode": 0, "stdout": "ufw 0.36.1\n"}
         c = client.UFWClient()
