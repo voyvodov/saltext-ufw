@@ -42,9 +42,9 @@ file = "README.md"
 content-type = "text/markdown"
 
 [project.urls]
-Homepage = "https://github.com/redsift/saltext-ufw"
-Source = "https://github.com/redsift/saltext-ufw"
-Tracker = "https://github.com/redsift/saltext-ufw/issues"
+Homepage = "https://github.com/voyvodov/saltext-ufw"
+Source = "https://github.com/voyvodov/saltext-ufw"
+Tracker = "https://github.com/voyvodov/saltext-ufw/issues"
 
 [project.optional-dependencies]
 changelog = ["towncrier==25.8.0"]
@@ -129,7 +129,7 @@ directory = "changelog/"
 start_string = "# Changelog\n"
 underlines = ["", "", ""]
 title_format = "## {version} ({project_date})"
-issue_format = "[#{issue}](https://github.com/redsift/saltext-ufw/issues/{issue})"
+issue_format = "[#{issue}](https://github.com/voyvodov/saltext-ufw/issues/{issue})"
 
 [[tool.towncrier.type]]
 directory = "breaking"

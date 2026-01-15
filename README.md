@@ -100,7 +100,7 @@ appreciate every contribution!
 [first-steps]: https://salt-extensions.github.io/salt-extension-copier/topics/creation.html#initialize-the-python-virtual-environment
 [submitting-pr]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork
 [direnv]: https://direnv.net
-[issues]: https://github.com/redsift/saltext-ufw/issues
-[PRs]: https://github.com/redsift/saltext-ufw/pulls
-[discussions]: https://github.com/redsift/saltext-ufw/discussions
+[issues]: https://github.com/voyvodov/saltext-ufw/issues
+[PRs]: https://github.com/voyvodov/saltext-ufw/pulls
+[discussions]: https://github.com/voyvodov/saltext-ufw/discussions
 [comments]: https://conventionalcomments.org/
