@@ -186,6 +186,14 @@ class UFWClientMock:
                 "retcode": 0,
             }
 
+        if command == "reset":
+            self.reset()
+            ret = {
+                "stdout": "Firewall reset to default state",
+                "stderr": "",
+                "retcode": 0,
+            }
+
         if command == "rule":
             direction = kwargs.get("direction") or "in"
             action = kwargs.get("action") or "allow"
