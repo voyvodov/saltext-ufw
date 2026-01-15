@@ -301,6 +301,14 @@ def add_rule(
     if direction and direction not in ["in", "out"]:
         raise CommandExecutionError("Invalid direction. Must be 'in' or 'out'.")
 
+    if app and (to_port or from_port):
+        raise CommandExecutionError("Cannot specify both application profile and ports.")
+
+    if app and not (to_ip or from_ip):
+        raise CommandExecutionError(
+            "When specifying an application profile, at least one of to_ip or from_ip must be set."
+        )
+
     if (from_port or to_port) and not from_ip:
         from_ip = "0.0.0.0/0"
 
@@ -377,7 +385,7 @@ def remove_rule(
         The protocol of the rule to remove (e.g., tcp, udp).
         If set ``to_port`` or ``from_port`` must also be set.
     app
-        The application profile of the rule to remove.
+        The application profile of the rule to remove. Can be used instead of specifying ports.
     dry_run
         If True, the command will be simulated without making any changes.
     """
@@ -389,6 +397,14 @@ def remove_rule(
 
     if direction and direction not in ["in", "out"]:
         raise CommandExecutionError("Invalid direction. Must be 'in' or 'out'.")
+
+    if app and (to_port or from_port):
+        raise CommandExecutionError("Cannot specify both application profile and ports.")
+
+    if app and not (to_ip or from_ip):
+        raise CommandExecutionError(
+            "When specifying an application profile, at least one of to_ip or from_ip must be set."
+        )
 
     if (from_port or to_port) and not from_ip:
         from_ip = "0.0.0.0/0"
