@@ -331,6 +331,7 @@ def add_rule(
 
 def remove_rule(
     action="allow",
+    position=None,
     direction=None,
     interface=None,
     from_ip=None,
@@ -352,6 +353,8 @@ def remove_rule(
 
     action
         The action of the rule to remove. Possible values: 'allow', 'deny', 'reject', 'limit'.
+    position
+        The position of the rule to remove (1-based index). If specified, other parameters are ignored.
     direction
         The direction of the rule to remove. Possible values: 'in', 'out'.
     interface
@@ -394,19 +397,27 @@ def remove_rule(
     cmd = "delete"
 
     try:
-        result = client.execute(
-            cmd,
-            dry_run=dry_run,
-            action=action,
-            direction=direction,
-            interface=interface,
-            from_ip=from_ip,
-            from_port=from_port,
-            to_ip=to_ip,
-            to_port=to_port,
-            proto=proto,
-            app=app,
-        )
+        if position:
+            result = client.execute(
+                cmd,
+                dry_run=dry_run,
+                position=position,
+            )
+        else:
+            result = client.execute(
+                cmd,
+                dry_run=dry_run,
+                action=action,
+                direction=direction,
+                interface=interface,
+                from_ip=from_ip,
+                from_port=from_port,
+                to_ip=to_ip,
+                to_port=to_port,
+                proto=proto,
+                app=app,
+            )
+
         if isinstance(result, dict):
             return result["stdout"].strip()
         return result

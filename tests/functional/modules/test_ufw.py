@@ -132,3 +132,27 @@ def test_add_rule_from_ip(ufw, ufw_client):
     rules = ufw_client.get_current_rules()
     rules = rules.splitlines()
     assert "### tuple ### allow any any 0.0.0.0/0 any 12.34.56.78 in" in rules
+
+
+def test_remove_rule(ufw, ufw_client):
+    # Add a rule to allow port
+    ufw.add_rule(
+        action="allow",
+        to_port="24000",
+        proto="tcp",
+        direction="in",
+    )
+
+    rules_before = ufw_client.get_current_rules()
+    rules_before = rules_before.splitlines()
+    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in" in rules_before
+    # Remove the rule
+    ufw.remove_rule(
+        action="allow",
+        to_port="24000",
+        proto="tcp",
+        direction="in",
+    )
+    rules_after = ufw_client.get_current_rules()
+    rules_after = rules_after.splitlines()
+    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in" not in rules_after
