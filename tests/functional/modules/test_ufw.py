@@ -1,7 +1,7 @@
 import logging
 
 import pytest
-from salt.exceptions import CommandExecutionError
+from salt.exceptions import SaltInvocationError
 
 pytestmark = [
     pytest.mark.skip_if_binaries_missing("ufw"),
@@ -160,7 +160,7 @@ def test_remove_rule(ufw, ufw_client):
 
 
 def test_ports_with_app_raise_error(ufw):
-    with pytest.raises(CommandExecutionError):
+    with pytest.raises(SaltInvocationError):
         ufw.add_rule(
             action="allow",
             to_port="25000",
@@ -170,7 +170,7 @@ def test_ports_with_app_raise_error(ufw):
 
 
 def test_app_without_ips_raise_error(ufw):
-    with pytest.raises(CommandExecutionError):
+    with pytest.raises(SaltInvocationError):
         ufw.add_rule(
             action="allow",
             app="SomeApp",

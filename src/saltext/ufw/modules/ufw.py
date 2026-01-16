@@ -5,7 +5,7 @@ Salt execution module
 import logging
 import re
 
-from salt.exceptions import CommandExecutionError
+from salt.exceptions import SaltInvocationError
 from salt.utils.path import which
 
 from saltext.ufw.utils.ufw.client import get_client
@@ -62,7 +62,7 @@ def disable():
     """
     client = get_client()
     try:
-        result = client.execute("disable", dry_run=__opts__["test"])
+        result = client.execute("disable")
         if isinstance(result, dict):
             return result["stdout"].strip()
         return result
@@ -180,11 +180,15 @@ def default_policy(direction, policy):
 
     if direction not in ["incoming", "outgoing", "routed"]:
         log.error(f"Invalid direction: {direction}. Must be 'incoming', 'outgoing', or 'routed'.")
-        return False
+        raise SaltInvocationError(
+            f"Invalid direction: {direction}. Must be 'incoming', 'outgoing', or 'routed'."
+        )
 
     if policy not in ["allow", "deny", "reject", "limit"]:
         log.error(f"Invalid policy: {policy}. Must be 'allow', 'deny', 'reject', or 'limit'.")
-        return False
+        raise SaltInvocationError(
+            f"Invalid policy: {policy}. Must be 'allow', 'deny', 'reject', or 'limit'."
+        )
 
     try:
         result = client.execute("default", policy=policy, direction=direction)
@@ -235,6 +239,28 @@ def reset():
     except UFWCommandError as err:
         log.error("Failed to reset UFW! %s: %s", type(err).__name__, err)
         return False
+
+
+def _check_rule_params(action, direction, to_ip, to_port, from_ip, from_port, app, proto):
+
+    if action not in ["allow", "deny", "reject", "limit"]:
+        raise SaltInvocationError("Invalid action. Must be 'allow', 'deny', 'reject', or 'limit'.")
+
+    if direction and direction not in ["in", "out"]:
+        raise SaltInvocationError("Invalid direction. Must be 'in' or 'out'.")
+
+    if app and (to_port or from_port):
+        raise SaltInvocationError("Cannot specify both application profile and ports.")
+
+    if app and not (to_ip or from_ip):
+        raise SaltInvocationError(
+            "When specifying an application profile, at least one of to_ip or from_ip must be set."
+        )
+
+    if proto and not (to_port or from_port):
+        raise SaltInvocationError(
+            "When specifying a protocol, at least one of to_port or from_port must be set."
+        )
 
 
 def add_rule(
@@ -289,25 +315,10 @@ def add_rule(
         If True, the command will be simulated without making any changes.
 
     """
-
     if insert and insert < 1:
-        raise CommandExecutionError("Rule insert position must be a positive integer.")
+        raise SaltInvocationError("Rule insert position must be a positive integer.")
 
-    if action not in ["allow", "deny", "reject", "limit"]:
-        raise CommandExecutionError(
-            "Invalid action. Must be 'allow', 'deny', 'reject', or 'limit'."
-        )
-
-    if direction and direction not in ["in", "out"]:
-        raise CommandExecutionError("Invalid direction. Must be 'in' or 'out'.")
-
-    if app and (to_port or from_port):
-        raise CommandExecutionError("Cannot specify both application profile and ports.")
-
-    if app and not (to_ip or from_ip):
-        raise CommandExecutionError(
-            "When specifying an application profile, at least one of to_ip or from_ip must be set."
-        )
+    _check_rule_params(action, direction, to_ip, to_port, from_ip, from_port, app, proto)
 
     if (from_port or to_port) and not from_ip:
         from_ip = "0.0.0.0/0"
@@ -390,21 +401,7 @@ def remove_rule(
         If True, the command will be simulated without making any changes.
     """
 
-    if action not in ["allow", "deny", "reject", "limit"]:
-        raise CommandExecutionError(
-            "Invalid action. Must be 'allow', 'deny', 'reject', or 'limit'."
-        )
-
-    if direction and direction not in ["in", "out"]:
-        raise CommandExecutionError("Invalid direction. Must be 'in' or 'out'.")
-
-    if app and (to_port or from_port):
-        raise CommandExecutionError("Cannot specify both application profile and ports.")
-
-    if app and not (to_ip or from_ip):
-        raise CommandExecutionError(
-            "When specifying an application profile, at least one of to_ip or from_ip must be set."
-        )
+    _check_rule_params(action, direction, to_ip, to_port, from_ip, from_port, app, proto)
 
     if (from_port or to_port) and not from_ip:
         from_ip = "0.0.0.0/0"
@@ -465,10 +462,9 @@ def logging_level(level):
         level = "off"
 
     if level not in ["off", "low", "medium", "high", "full"]:
-        log.error(
+        raise SaltInvocationError(
             f"Invalid logging level: {level}. Must be 'off', 'low', 'medium', 'high', or 'full'."
         )
-        return False
 
     try:
         result = client.execute("logging", level=level)
