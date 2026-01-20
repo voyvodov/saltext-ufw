@@ -124,7 +124,7 @@ jobs:
   deploy-python-package:
     name: Deploy Python Package (PyPI)
     uses: ./.github/workflows/deploy-package-action.yml
-    if: ${{ inputs.release && success() }}
+    if: ${{ inputs.release && success() && !startsWith(inputs.version, 'rc') }}
     needs:
       - deploy-python-package-test-pypi
     secrets:
