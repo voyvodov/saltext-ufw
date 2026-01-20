@@ -132,6 +132,7 @@ jobs:
     with:
       test: false
       version: "${{ inputs.version }}"
+      rc: ${{ !contains(inputs.version, '-rc') }}
 
   set-pipeline-exit-status:
     # This step is just so we can make github require this step, to pass checks
