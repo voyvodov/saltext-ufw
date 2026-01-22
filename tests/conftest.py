@@ -80,7 +80,7 @@ def minion(master, minion_config, minion_config_overrides):  # pragma: no cover
 
 
 @pytest.fixture()
-def ufw_client(monkeypatch):
+def ufw_client(monkeypatch, firewall_rules_file):
     # mock = MagicMock(spec_set=ufw_client_module.UFWClient)
     # default_cmd_response = {"stdout": "", "stderr": "", "retcode": 0}
     # mock._execute.return_value = default_cmd_response
@@ -92,16 +92,27 @@ def ufw_client(monkeypatch):
     # mock.get_current_rules.side_effect = get_current_rules_side_effect
 
     with patch("saltext.ufw.utils.ufw.client.UFWClient") as mocked_cls:
-        mock = UFWClientMock()
+        mock = UFWClientMock(rules_file=firewall_rules_file)
         mocked_cls.return_value = mock
         monkeypatch.setattr(ufw_client_module, "get_client", MagicMock(return_value=mock))
 
         yield mock
 
 
+@pytest.fixture
+def firewall_rules_file():
+    return "/tmp/mock_ufw_user.rules"
+
+
+@pytest.fixture(autouse=True)
+def mock_list_current_rules(firewall_rules_file):
+    with patch("saltext.ufw.utils.ufw.rules.USER_RULES_FILES", [firewall_rules_file]):
+        yield
+
+
 class UFWClientMock:
     rules_file = None
-    mock_firewall_rules_file = "/tmp/mock_ufw_user.rules"
+    mock_firewall_rules_file = ""
     logging_level = "off"
     state = "active"
     default_policy = {
@@ -110,8 +121,9 @@ class UFWClientMock:
         "routed": "deny",
     }
 
-    def __init__(self):
-        pass
+    def __init__(self, rules_file=None):
+        if rules_file is not None:
+            self.mock_firewall_rules_file = rules_file
 
     def reset(self):
         with open(self.mock_firewall_rules_file, "w", encoding="utf-8") as f:
@@ -195,77 +207,72 @@ class UFWClientMock:
             }
 
         if command == "rule":
+            method = kwargs.get("method") or None
             direction = kwargs.get("direction") or "in"
             action = kwargs.get("action") or "allow"
-            to_port = kwargs.get("to_port") or "any"
-            from_port = kwargs.get("from_port") or "any"
+            dport = kwargs.get("dport") or "any"
+            sport = kwargs.get("sport") or "any"
             proto = kwargs.get("proto") or "any"
-            from_ip = kwargs.get("from_ip") or "0.0.0.0/0"
-            to_ip = kwargs.get("to_ip") or "0.0.0.0/0"
+            src = kwargs.get("src") or "0.0.0.0/0"
+            dst = kwargs.get("dst") or "0.0.0.0/0"
 
             if (kwargs.get("interface") or None) is not None:
                 interface = kwargs.get("interface")
                 direction = f"{direction}_{interface}"
 
-            rule_line = f"### tuple ### {action} {proto} {to_port} {to_ip} {from_port} {from_ip} {direction}\n"
-            if dry_run:
-                current_rules = self.get_current_rules().splitlines()
-                if rule_line.strip() in current_rules:
-                    return {
-                        "stdout": "Skipping adding existing rule",
-                        "stderr": "",
-                        "retcode": 0,
-                    }
-                join = "\n".join(current_rules + [rule_line.strip()])
-                return {
-                    "stdout": join,
-                    "stderr": "",
-                    "retcode": 0,
-                }
+            rule_line = f"### tuple ### {action} {proto} {dport} {dst} {sport} {src} {direction}\n"
 
-            with open(self.mock_firewall_rules_file, "a", encoding="utf-8") as f:
-                f.write(rule_line)
-
-            ret = {
-                "stdout": "Rule added",
-                "stderr": "",
-                "retcode": 0,
-            }
-
-        if command == "delete":
-            with open(self.mock_firewall_rules_file, encoding="utf-8") as f:
-                rules = f.read()
-
-            direction = kwargs.get("direction") or "in"
-            action = kwargs.get("action") or "allow"
-            to_port = kwargs.get("to_port") or "any"
-            from_port = kwargs.get("from_port") or "any"
-            proto = kwargs.get("proto") or "any"
-            from_ip = kwargs.get("from_ip") or "0.0.0.0/0"
-            to_ip = kwargs.get("to_ip") or "0.0.0.0/0"
-
-            if kwargs.get("interface", None) is not None:
-                interface = kwargs.get("interface")
-                direction = f"{direction}_{interface}"
-
-            rule_line = f"### tuple ### {action} {proto} {to_port} {from_ip} {from_port} {to_ip} {direction}\n"
-            if dry_run:
-                return {
-                    "stdout": rules.replace(rule_line, ""),
-                    "stderr": "",
-                    "retcode": 0,
-                }
-
-            with open(self.mock_firewall_rules_file, "w", encoding="utf-8") as f:
-                f.write(rules.replace(rule_line, ""))
-
-            ret = {
-                "stdout": "Rule removed",
-                "stderr": "",
-                "retcode": 0,
-            }
+            if method == "delete":
+                ret = self._delete_rule(rule_line, dry_run=dry_run)
+            else:
+                ret = self._add_rule(rule_line, dry_run=dry_run)
 
         return ret
+
+    def _add_rule(self, rule_line, dry_run=False):
+        current_rules = self.get_current_rules().splitlines()
+        if rule_line.strip() in current_rules:
+            return {
+                "stdout": "Skipping adding existing rule",
+                "stderr": "",
+                "retcode": 0,
+            }
+        if dry_run:
+            join = "\n".join(current_rules + [rule_line.strip()])
+            return {
+                "stdout": join,
+                "stderr": "",
+                "retcode": 0,
+            }
+
+        with open(self.mock_firewall_rules_file, "a", encoding="utf-8") as f:
+            f.write(rule_line)
+
+        return {
+            "stdout": "Rule added",
+            "stderr": "",
+            "retcode": 0,
+        }
+
+    def _delete_rule(self, rule_line, dry_run=False):
+        with open(self.mock_firewall_rules_file, encoding="utf-8") as f:
+            rules = f.read()
+
+        if dry_run:
+            return {
+                "stdout": rules.replace(rule_line, ""),
+                "stderr": "",
+                "retcode": 0,
+            }
+
+        with open(self.mock_firewall_rules_file, "w", encoding="utf-8") as f:
+            f.write(rules.replace(rule_line, ""))
+
+        return {
+            "stdout": "Rule removed",
+            "stderr": "",
+            "retcode": 0,
+        }
 
     def get_current_rules(self):
         with open(self.mock_firewall_rules_file, encoding="utf-8") as f:

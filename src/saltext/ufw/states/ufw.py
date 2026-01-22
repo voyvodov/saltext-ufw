@@ -5,13 +5,12 @@ Salt state module
 import logging
 
 from saltext.ufw.utils.ufw import network as utilnet
-from saltext.ufw.utils.ufw.client import get_client
 from saltext.ufw.utils.ufw.exceptions import UFWCommandError
 from saltext.ufw.utils.ufw.filter import filter_line_that_contains
 from saltext.ufw.utils.ufw.filter import filter_line_that_contains_ipv4
 from saltext.ufw.utils.ufw.filter import filter_line_that_contains_ipv6
 from saltext.ufw.utils.ufw.filter import filter_line_that_not_start_with
-from saltext.ufw.utils.ufw.filter import remove_tuple_prefix
+from saltext.ufw.utils.ufw.rules import list_current_rules
 
 log = logging.getLogger(__name__)
 
@@ -26,30 +25,25 @@ def __virtual__():
     return __virtualname__
 
 
-def _compare_rules(rules_current, rules_dry, from_ip, to_ip):
+def _compare_rules(rules_current, rules_dry, src, dst):
     changes = {}
 
-    if from_ip is None:
-        from_ip = "0.0.0.0/0"
-    if to_ip is None:
-        to_ip = "0.0.0.0/0"
+    if src is None:
+        src = "0.0.0.0/0"
+    if dst is None:
+        dst = "0.0.0.0/0"
 
     # Filter out non-tuple lines. Those are rules which are not relevant for comparison
     # We care only about user defined rules which are stored as tuples
     rules_dry = filter_line_that_not_start_with("### tuple", rules_dry)
 
-    # Remove tuple prefix from current rules for accurate comparison
-    rules_current = remove_tuple_prefix(rules_current)
-    rules_dry = remove_tuple_prefix(rules_dry)
-
-    log.info(f"Checking for from_ip: {from_ip}, to_ip: {to_ip}")
-    if utilnet.is_starting_by_ipv4(from_ip) or utilnet.is_starting_by_ipv4(to_ip):
+    if utilnet.is_starting_by_ipv4(src) or utilnet.is_starting_by_ipv4(dst):
         rules_current = filter_line_that_contains_ipv4(rules_current)
         rules_dry = filter_line_that_contains_ipv4(rules_dry)
         if rules_current != rules_dry:
             changes["old"] = rules_current
             changes["new"] = rules_dry
-    elif utilnet.is_starting_by_ipv6(from_ip) or utilnet.is_starting_by_ipv6(to_ip):
+    elif utilnet.is_starting_by_ipv6(src) or utilnet.is_starting_by_ipv6(dst):
         rules_current = filter_line_that_contains_ipv6(rules_current)
         rules_dry = filter_line_that_contains_ipv6(rules_dry)
         if rules_current != rules_dry:
@@ -225,10 +219,10 @@ def rule_present(
     insert=None,
     direction="in",
     interface=None,
-    from_ip=None,
-    from_port=None,
-    to_ip=None,
-    to_port=None,
+    src=None,
+    sport=None,
+    dst=None,
+    dport=None,
     proto=None,
     app=None,
     comment=None,
@@ -255,16 +249,16 @@ def rule_present(
     interface
         The network interface to apply the rule to. If not specified, the rule applies to all interfaces.
 
-    from_ip
+    src
         The source IP address or subnet for the rule. If not specified, the rule applies to all source addresses.
 
-    from_port
+    sport
         The source port for the rule. If not specified, the rule applies to all source ports.
 
-    to_ip
+    dst
         The destination IP address or subnet for the rule. If not specified, the rule applies to all destination addresses.
 
-    to_port
+    dport
         The destination port for the rule. If not specified, the rule applies to all destination ports.
 
     proto
@@ -289,14 +283,12 @@ def rule_present(
 
     changes = {}
 
-    if proto is not None and (
-        from_port is None and to_port is None and from_ip is None and to_ip is None
-    ):
+    if proto is not None and (sport is None and dport is None and src is None and dst is None):
         ret["result"] = False
         ret[
             "comment"
         ] = """When 'proto' is specified,
-            any of 'to_port', 'from_port', 'to_ip', 'from_ip' must also be specified."""
+            any of 'dport', 'sport', 'dst', 'src' must also be specified."""
         return ret
 
     rules_dry = __salt__["ufw.add_rule"](
@@ -304,10 +296,10 @@ def rule_present(
         action=action,
         direction=direction,
         interface=interface,
-        from_ip=from_ip,
-        from_port=from_port,
-        to_ip=to_ip,
-        to_port=to_port,
+        src=src,
+        sport=sport,
+        dst=dst,
+        dport=dport,
         proto=proto,
         app=app,
         comment=comment,
@@ -320,21 +312,14 @@ def rule_present(
     if nb_skipping_line > 0:
         return ret
 
-    client = get_client()
     # Get current rules and compare
-    try:
-        rules_current = client.get_current_rules()
-    except UFWCommandError as err:
-        log.error("Failed to get UFW current rules! %s: %s", type(err).__name__, err)
-        ret["result"] = False
-        ret["comment"] = f"Failed to get UFW current rules: {err}"
-        return ret
+    rules_current = list_current_rules()
 
     changes = _compare_rules(
         rules_current=rules_current,
         rules_dry=rules_dry,
-        from_ip=from_ip,
-        to_ip=to_ip,
+        src=src,
+        dst=dst,
     )
 
     ret["changes"] = changes
@@ -350,10 +335,10 @@ def rule_present(
                 action=action,
                 direction=direction,
                 interface=interface,
-                from_ip=from_ip,
-                from_port=from_port,
-                to_ip=to_ip,
-                to_port=to_port,
+                src=src,
+                sport=sport,
+                dst=dst,
+                dport=dport,
                 proto=proto,
                 app=app,
                 comment=comment,
@@ -374,10 +359,10 @@ def rule_absent(
     action="allow",
     direction="in",
     interface=None,
-    from_ip=None,
-    from_port=None,
-    to_ip=None,
-    to_port=None,
+    src=None,
+    sport=None,
+    dst=None,
+    dport=None,
     proto=None,
     app=None,
 ):
@@ -398,22 +383,22 @@ def rule_absent(
     interface
         The network interface of the rule to remove. If not specified, the rule applies to all interfaces.
 
-    from_ip
+    src
         The source IP address or subnet of the rule to remove. If not specified, the rule applies to all source addresses.
 
-    from_port
+    sport
         The source port of the rule to remove. If not specified, the rule applies to all source ports.
 
-    to_ip
+    dst
         The destination IP address or subnet of the rule to remove. If not specified, the rule applies to all destination addresses.
 
-    to_port
+    dport
         The destination port of the rule to remove. If not specified, the rule applies to all destination ports.
 
     proto
         The protocol of the rule to remove. One of: ``tcp``, ``udp``, ``any``
         If not specified, the rule applies to all protocols.
-        If specified, ``to_port`` or ``from_port`` must also be set.
+        If specified, ``dport`` or ``sport`` must also be set.
 
     """
 
@@ -426,9 +411,7 @@ def rule_absent(
 
     changes = {}
 
-    if proto is not None and (
-        from_port is None and to_port is None and from_ip is None and to_ip is None
-    ):
+    if proto is not None and (sport is None and dport is None and src is None and dst is None):
         ret["result"] = False
         ret[
             "comment"
@@ -440,30 +423,22 @@ def rule_absent(
         action=action,
         direction=direction,
         interface=interface,
-        from_ip=from_ip,
-        from_port=from_port,
-        to_ip=to_ip,
-        to_port=to_port,
+        src=src,
+        sport=sport,
+        dst=dst,
+        dport=dport,
         proto=proto,
         app=app,
         dry_run=True,
     )
 
-    client = get_client()
-    # Get current rules and compare
-    try:
-        rules_current = client.get_current_rules()
-    except UFWCommandError as err:
-        log.error("Failed to get UFW current rules! %s: %s", type(err).__name__, err)
-        ret["result"] = False
-        ret["comment"] = f"Failed to get UFW current rules: {err}"
-        return ret
+    rules_current = list_current_rules()
 
     changes = _compare_rules(
         rules_current=rules_current,
         rules_dry=rules_dry,
-        from_ip=from_ip,
-        to_ip=to_ip,
+        src=src,
+        dst=dst,
     )
 
     ret["changes"] = changes
@@ -479,10 +454,10 @@ def rule_absent(
                 action=action,
                 direction=direction,
                 interface=interface,
-                from_ip=from_ip,
-                from_port=from_port,
-                to_ip=to_ip,
-                to_port=to_port,
+                src=src,
+                sport=sport,
+                dst=dst,
+                dport=dport,
                 proto=proto,
                 app=app,
             )

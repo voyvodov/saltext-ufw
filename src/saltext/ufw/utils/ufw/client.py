@@ -11,15 +11,6 @@ log = logging.getLogger(__name__)
 class UFWClient:
     def __init__(self):
         self.ufw_path = "/usr/sbin/ufw"
-        self.grep_path = cmdmod.which("grep") or "/bin/grep"
-        self.user_rules_files = [
-            "/lib/ufw/user.rules",
-            "/lib/ufw/user6.rules",
-            "/etc/ufw/user.rules",
-            "/etc/ufw/user6.rules",
-            "/var/lib/ufw/user.rules",
-            "/var/lib/ufw/user6.rules",
-        ]
 
     def _execute(self, cmd, ignore_errors=False):
         log.debug(f"Executing UFW command: {cmd}")
@@ -35,7 +26,12 @@ class UFWClient:
         args = []
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
+        if kwargs.get("method", None) is not None:
+            # method is required first argument
+            args.append(f"{kwargs.pop('method')}")
+
         for k, v in kwargs.items():
+            # Build arguments based on keyword arguments
             if k == "insert":
                 args.append(f"insert {str(v)}")
             elif k == "action":
@@ -44,13 +40,13 @@ class UFWClient:
                 args.append(f"{v}")
             elif k == "interface":
                 args.append(f"on {v}")
-            elif k == "from_ip":
+            elif k == "src":
                 args.append(f"from {v}")
-            elif k == "from_port":
+            elif k == "sport":
                 args.append(f"port {v}")
-            elif k == "to_ip":
+            elif k == "dst":
                 args.append(f"to {v}")
-            elif k == "to_port":
+            elif k == "dport":
                 args.append(f"port {v}")
             elif k == "proto":
                 args.append(f"proto {v}")
@@ -107,13 +103,6 @@ class UFWClient:
             rev = int(matches.group(3))
 
         return major, minor, rev
-
-    def get_current_rules(self):
-        cmd = [self.grep_path, "-h", "'^### tuple'"]
-        cmd.extend(self.user_rules_files)
-        cmd = " ".join(cmd)
-        out = self._execute(cmd, ignore_errors=True)
-        return out["stdout"]
 
 
 def get_client():
