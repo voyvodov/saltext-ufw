@@ -64,7 +64,7 @@ def test_reset(ufw, ufw_client):
     ufw.add_rule(
         action="allow",
         direction="in",
-        to_port="25000",
+        dport="25000",
         proto="tcp",
     )
     rules_before_reset = ufw_client.get_current_rules()
@@ -79,7 +79,7 @@ def test_add_rule_port(ufw, ufw_client):
     # Add a rule to allow port
     ret = ufw.add_rule(
         action="allow",
-        to_port="22000",
+        dport="22000",
         proto="tcp",
         direction="in",
     )
@@ -95,7 +95,7 @@ def test_add_rule_deny_port(ufw, ufw_client):
     # Add a rule to deny port
     ret = ufw.add_rule(
         action="deny",
-        to_port="23000",
+        dport="23000",
         proto="tcp",
         direction="in",
     )
@@ -112,7 +112,7 @@ def test_add_rule_to_ip(ufw, ufw_client):
     ret = ufw.add_rule(
         action="allow",
         direction="in",
-        to_ip="12.34.56.78",
+        dst="12.34.56.78",
     )
     assert ret == "Rule added"
 
@@ -126,7 +126,7 @@ def test_add_rule_from_ip(ufw, ufw_client):
     ret = ufw.add_rule(
         action="allow",
         direction="in",
-        from_ip="12.34.56.78",
+        src="12.34.56.78",
     )
     assert ret == "Rule added"
 
@@ -139,7 +139,7 @@ def test_remove_rule(ufw, ufw_client):
     # Add a rule to allow port
     ufw.add_rule(
         action="allow",
-        to_port="24000",
+        dport="24000",
         proto="tcp",
         direction="in",
     )
@@ -150,7 +150,7 @@ def test_remove_rule(ufw, ufw_client):
     # Remove the rule
     ufw.remove_rule(
         action="allow",
-        to_port="24000",
+        dport="24000",
         proto="tcp",
         direction="in",
     )
@@ -163,7 +163,7 @@ def test_ports_with_app_raise_error(ufw):
     with pytest.raises(SaltInvocationError):
         ufw.add_rule(
             action="allow",
-            to_port="25000",
+            dport="25000",
             app="SomeApp",
             direction="in",
         )
@@ -176,3 +176,84 @@ def test_app_without_ips_raise_error(ufw):
             app="SomeApp",
             direction="in",
         )
+
+
+def test_list_rules(ufw):
+    # Add some rules first
+    ufw.add_rule(
+        action="allow",
+        dport="26000",
+        proto="tcp",
+        direction="in",
+    )
+    ufw.add_rule(
+        action="deny",
+        dport="27000",
+        proto="udp",
+        direction="in",
+    )
+
+    rules = ufw.list_rules()
+    assert isinstance(rules, list)
+    assert len(rules) >= 2
+    # Check that rules contain expected information
+    assert any("26000" in str(rule) for rule in rules)
+    assert any("27000" in str(rule) for rule in rules)
+
+
+def test_get_rules(ufw):
+    # Add some rules first
+    ufw.add_rule(
+        action="allow",
+        dport="28000",
+        proto="tcp",
+        direction="in",
+    )
+    ufw.add_rule(
+        action="deny",
+        src="10.0.0.1",
+        direction="in",
+    )
+
+    rules = ufw.get_rules()
+    assert isinstance(rules, list)
+    assert len(rules) == 2
+    # Check that rules dictionary contains numbered entries
+    frule = rules[0]
+    srule = rules[1]
+
+    assert frule.get("dport") == "28000"
+    assert frule.get("protocol") == "tcp"
+    assert frule.get("action") == "allow"
+
+    assert srule.get("src") == "10.0.0.1"
+    assert srule.get("action") == "deny"
+
+
+def test_get_rules_with_index(ufw):
+    # Add some rules first
+    ufw.add_rule(
+        action="allow",
+        dport="29000",
+        proto="tcp",
+        direction="in",
+    )
+    ufw.add_rule(
+        action="deny",
+        src="10.0.0.2",
+        direction="in",
+    )
+    rules = ufw.get_rules(index=1)
+    assert isinstance(rules, list)
+    assert len(rules) == 1
+    rule = rules[0]
+    assert rule.get("action") == "allow"
+    assert rule.get("dport") == "29000"
+    assert rule.get("protocol") == "tcp"
+
+    rules = ufw.get_rules(index=2)
+    assert isinstance(rules, list)
+    assert len(rules) == 1
+    rule = rules[0]
+    assert rule.get("action") == "deny"
+    assert rule.get("src") == "10.0.0.2"

@@ -13,4 +13,5 @@ _________
     ufw.exceptions
     ufw.filter
     ufw.network
+    ufw.rules
     versions

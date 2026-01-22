@@ -10,6 +10,8 @@ from salt.utils.path import which
 
 from saltext.ufw.utils.ufw.client import get_client
 from saltext.ufw.utils.ufw.exceptions import UFWCommandError
+from saltext.ufw.utils.ufw.rules import get_firewall_rules
+from saltext.ufw.utils.ufw.rules import list_current_rules
 
 log = logging.getLogger(__name__)
 
@@ -241,7 +243,7 @@ def reset():
         return False
 
 
-def _check_rule_params(action, direction, to_ip, to_port, from_ip, from_port, app, proto):
+def _check_rule_params(action, direction, dst, dport, src, sport, app, proto):
 
     if action not in ["allow", "deny", "reject", "limit"]:
         raise SaltInvocationError("Invalid action. Must be 'allow', 'deny', 'reject', or 'limit'.")
@@ -249,17 +251,17 @@ def _check_rule_params(action, direction, to_ip, to_port, from_ip, from_port, ap
     if direction and direction not in ["in", "out"]:
         raise SaltInvocationError("Invalid direction. Must be 'in' or 'out'.")
 
-    if app and (to_port or from_port):
+    if app and (dport or sport):
         raise SaltInvocationError("Cannot specify both application profile and ports.")
 
-    if app and not (to_ip or from_ip):
+    if app and not (dst or src):
         raise SaltInvocationError(
-            "When specifying an application profile, at least one of to_ip or from_ip must be set."
+            "When specifying an application profile, at least one of dst or src must be set."
         )
 
-    if proto and not (to_port or from_port):
+    if proto and not (dport or sport):
         raise SaltInvocationError(
-            "When specifying a protocol, at least one of to_port or from_port must be set."
+            "When specifying a protocol, at least one of dport or sport must be set."
         )
 
 
@@ -268,10 +270,10 @@ def add_rule(
     action="allow",
     direction=None,
     interface=None,
-    from_ip=None,
-    from_port=None,
-    to_ip=None,
-    to_port=None,
+    src=None,
+    sport=None,
+    dst=None,
+    dport=None,
     proto=None,
     app=None,
     comment=None,
@@ -294,15 +296,15 @@ def add_rule(
         The direction of the rule. Possible values: 'in', 'out'.
     interface
         The network interface to apply the rule on.
-    from_ip
+    src
         The source IP address for the rule.
-        Defaults to 0.0.0.0/0 if ``from_port`` or ``to_port`` is set.
-    from_port
+        Defaults to 0.0.0.0/0 if ``sport`` or ``dport`` is set.
+    sport
         The source port for the rule.
-    to_ip
+    dst
         The destination IP address for the rule.
-        Defaults to 0.0.0.0/0 if ``from_port`` or ``to_port`` is set.
-    to_port
+        Defaults to 0.0.0.0/0 if ``sport`` or ``dport`` is set.
+    dport
         The destination port for the rule.
     proto
         The protocol for the rule (e.g., tcp, udp).
@@ -318,13 +320,13 @@ def add_rule(
     if insert and insert < 1:
         raise SaltInvocationError("Rule insert position must be a positive integer.")
 
-    _check_rule_params(action, direction, to_ip, to_port, from_ip, from_port, app, proto)
+    _check_rule_params(action, direction, dst, dport, src, sport, app, proto)
 
-    if (from_port or to_port) and not from_ip:
-        from_ip = "0.0.0.0/0"
+    if (sport or dport) and not src:
+        src = "0.0.0.0/0"
 
-    if (from_port or to_port) and not to_ip:
-        to_ip = "0.0.0.0/0"
+    if (sport or dport) and not dst:
+        dst = "0.0.0.0/0"
 
     client = get_client()
     cmd = "rule"
@@ -336,10 +338,10 @@ def add_rule(
             action=action,
             direction=direction,
             interface=interface,
-            from_ip=from_ip,
-            from_port=from_port,
-            to_ip=to_ip,
-            to_port=to_port,
+            src=src,
+            sport=sport,
+            dst=dst,
+            dport=dport,
             proto=proto,
             app=app,
             comment=comment,
@@ -357,10 +359,10 @@ def remove_rule(
     position=None,
     direction=None,
     interface=None,
-    from_ip=None,
-    from_port=None,
-    to_ip=None,
-    to_port=None,
+    dst=None,
+    dport=None,
+    src=None,
+    sport=None,
     proto=None,
     app=None,
     dry_run=False,
@@ -382,16 +384,16 @@ def remove_rule(
         The direction of the rule to remove. Possible values: 'in', 'out'.
     interface
         The network interface of the rule to remove.
-    from_ip
-        The source IP address of the rule to remove.
-        Defaults to 0.0.0.0/0 if ``from_port`` or ``to_port`` is set.
-    from_port
-        The source port of the rule to remove.
-    to_ip
+    dst
         The destination IP address of the rule to remove.
         Defaults to 0.0.0.0/0 if ``from_port`` or ``to_port`` is set.
-    to_port
+    dport
         The destination port of the rule to remove.
+    src
+        The source IP address of the rule to remove.
+        Defaults to 0.0.0.0/0 if ``from_port`` or ``to_port`` is set.
+    sport
+        The source port of the rule to remove.
     proto
         The protocol of the rule to remove (e.g., tcp, udp).
         If set ``to_port`` or ``from_port`` must also be set.
@@ -401,20 +403,21 @@ def remove_rule(
         If True, the command will be simulated without making any changes.
     """
 
-    _check_rule_params(action, direction, to_ip, to_port, from_ip, from_port, app, proto)
+    _check_rule_params(action, direction, dst, dport, src, sport, app, proto)
 
-    if (from_port or to_port) and not from_ip:
-        from_ip = "0.0.0.0/0"
+    if (sport or dport) and not src:
+        src = "0.0.0.0/0"
 
-    if (from_port or to_port) and not to_ip:
-        to_ip = "0.0.0.0/0"
+    if (sport or dport) and not dst:
+        dst = "0.0.0.0/0"
 
     client = get_client()
 
-    cmd = "delete"
+    cmd = "rule"
 
     try:
         if position:
+            cmd = "delete"
             result = client.execute(
                 cmd,
                 dry_run=dry_run,
@@ -423,14 +426,15 @@ def remove_rule(
         else:
             result = client.execute(
                 cmd,
+                method="delete",
                 dry_run=dry_run,
                 action=action,
                 direction=direction,
                 interface=interface,
-                from_ip=from_ip,
-                from_port=from_port,
-                to_ip=to_ip,
-                to_port=to_port,
+                src=src,
+                sport=sport,
+                dst=dst,
+                dport=dport,
                 proto=proto,
                 app=app,
             )
@@ -473,4 +477,56 @@ def logging_level(level):
         return result
     except UFWCommandError as err:
         log.error("Failed to set UFW logging level! %s: %s", type(err).__name__, err)
+        return False
+
+
+def list_rules():
+    """
+    List UFW rules as simple text output.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' ufw.list_rules
+    """
+    # client = get_client()
+    try:
+        result = list_current_rules()
+
+        return result
+    except UFWCommandError as err:
+        log.error("Failed to list UFW rules! %s: %s", type(err).__name__, err)
+        return False
+
+
+def get_rules(index=None):
+    """
+    Get UFW rules as a list of dictionaries with all rule attributes.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' ufw.get_rules
+
+    index
+        If specified, returns only the rule at the given index (1-based).
+    """
+
+    try:
+        result = get_firewall_rules()
+
+        if index is not None:
+            if not isinstance(index, int):
+                raise SaltInvocationError("Rule index must be an integer.")
+
+            if index < 1 or index > len(result):
+                raise SaltInvocationError("Rule index out of range.")
+
+            result = [rule for rule in result if index == rule["index"]]
+
+        return result
+    except UFWCommandError as err:
+        log.error("Failed to get UFW rules! %s: %s", type(err).__name__, err)
         return False

@@ -5,18 +5,26 @@ from saltext.ufw.utils.ufw.network import ipv6_regexp
 
 
 def filter_line_that_not_start_with(pattern, content):
+    if isinstance(content, list):
+        return "".join([line for line in content if not line.startswith(pattern)])
     return "".join([line for line in content.splitlines(True) if line.startswith(pattern)])
 
 
 def filter_line_that_contains(pattern, content):
+    if isinstance(content, list):
+        return [line for line in content if pattern in line]
     return [line for line in content.splitlines(True) if pattern in line]
 
 
 def filter_line_that_not_contains(pattern, content):
+    if isinstance(content, list):
+        return "".join([line for line in content if not line.contains(pattern)])
     return "".join([line for line in content.splitlines(True) if not line.contains(pattern)])
 
 
 def filter_line_that_match_func(match_func, content):
+    if isinstance(content, list):
+        return "".join([line for line in content if match_func(line) is not None])
     return "".join([line for line in content.splitlines(True) if match_func(line) is not None])
 
 

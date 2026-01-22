@@ -6,13 +6,6 @@ from saltext.ufw.utils.ufw import client
 
 
 class TestUFWClient:
-    @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_init_sets_paths(self, _):
-        c = client.UFWClient()
-        assert c.ufw_path == "/usr/sbin/ufw"
-        assert c.grep_path == "/bin/grep"
-        assert "/etc/ufw/user.rules" in c.user_rules_files
-
     @patch("salt.modules.cmdmod.run_all")
     def test__execute_success(self, mock_run_all):
         mock_run_all.return_value = {"retcode": 0, "stdout": "ok"}
@@ -54,14 +47,6 @@ class TestUFWClient:
         with pytest.raises(client.UFWCommandError):
             c.version()
 
-    @patch("salt.modules.cmdmod.run_all")
-    def test_get_current_rules(self, mock_run_all):
-        mock_run_all.return_value = {"retcode": 0, "stdout": "rule1\nrule2"}
-        c = client.UFWClient()
-        rules = c.get_current_rules()
-        assert "rule1" in rules
-        assert "rule2" in rules
-
 
 def test_get_client_returns_instance():
     c = client.get_client()
@@ -98,31 +83,31 @@ class TestBuildArgs:
         assert result == ["on eth0"]
 
     @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_build_args_with_from_ip(self, _):
-        """Test _build_args with from_ip parameter"""
+    def test_build_args_with_src(self, _):
+        """Test _build_args with src parameter"""
         c = client.UFWClient()
-        result = c._build_args(from_ip="192.168.1.1")
+        result = c._build_args(src="192.168.1.1")
         assert result == ["from 192.168.1.1"]
 
     @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_build_args_with_from_port(self, _):
-        """Test _build_args with from_port parameter"""
+    def test_build_args_with_sport(self, _):
+        """Test _build_args with sport parameter"""
         c = client.UFWClient()
-        result = c._build_args(from_port="8080")
+        result = c._build_args(sport="8080")
         assert result == ["port 8080"]
 
     @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_build_args_with_to_ip(self, _):
-        """Test _build_args with to_ip parameter"""
+    def test_build_args_with_dst(self, _):
+        """Test _build_args with dst parameter"""
         c = client.UFWClient()
-        result = c._build_args(to_ip="10.0.0.1")
+        result = c._build_args(dst="10.0.0.1")
         assert result == ["to 10.0.0.1"]
 
     @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_build_args_with_to_port(self, _):
-        """Test _build_args with to_port parameter"""
+    def test_build_args_with_dport(self, _):
+        """Test _build_args with dport parameter"""
         c = client.UFWClient()
-        result = c._build_args(to_port="80")
+        result = c._build_args(dport="80")
         assert result == ["port 80"]
 
     @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
@@ -179,7 +164,7 @@ class TestBuildArgs:
     def test_build_args_filters_none_values(self, _):
         """Test that None values are filtered out"""
         c = client.UFWClient()
-        result = c._build_args(action="allow", from_ip=None, to_ip="10.0.0.1")
+        result = c._build_args(action="allow", src=None, dst="10.0.0.1")
         assert "allow" in result
         assert "to 10.0.0.1" in result
         assert len([arg for arg in result if "from" in arg]) == 0
@@ -191,8 +176,8 @@ class TestBuildArgs:
         result = c._build_args(
             action="allow",
             direction="in",
-            from_ip="192.168.1.0/24",
-            to_port="22",
+            src="192.168.1.0/24",
+            dport="22",
             proto="tcp",
         )
         assert "allow" in result
@@ -238,7 +223,7 @@ class TestExecuteCommand:
         """Test that execute builds the full command correctly"""
         mock_run_all.return_value = {"retcode": 0, "stdout": "ok"}
         c = client.UFWClient()
-        c.execute("allow", from_ip="192.168.1.1", to_port="80", proto="tcp")
+        c.execute("allow", src="192.168.1.1", dport="80", proto="tcp")
         called_cmd = mock_run_all.call_args[0][0]
         assert "/usr/sbin/ufw" in called_cmd
         assert "allow" in called_cmd
@@ -311,36 +296,3 @@ class TestVersionParsing:
         assert major == 1
         assert minor == 0
         assert rev == 0
-
-
-class TestGetCurrentRules:
-    @patch("salt.modules.cmdmod.run_all")
-    @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_get_current_rules_success(self, _, mock_run_all):
-        """Test get_current_rules returns stdout"""
-        expected_rules = "### tuple ### rule1\n### tuple ### rule2\n"
-        mock_run_all.return_value = {"retcode": 0, "stdout": expected_rules}
-        c = client.UFWClient()
-        rules = c.get_current_rules()
-        assert rules == expected_rules
-
-    @patch("salt.modules.cmdmod.run_all")
-    @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_get_current_rules_uses_correct_files(self, _, mock_run_all):
-        """Test that get_current_rules searches in correct files"""
-        mock_run_all.return_value = {"retcode": 0, "stdout": ""}
-        c = client.UFWClient()
-        c.get_current_rules()
-        called_cmd = mock_run_all.call_args[0][0]
-        # Verify that user rules files are included in the command
-        assert "/etc/ufw/user.rules" in called_cmd or "user.rules" in called_cmd
-
-    @patch("salt.modules.cmdmod.run_all")
-    @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_get_current_rules_ignores_errors(self, _, mock_run_all):
-        """Test that get_current_rules ignores grep errors (no matches)"""
-        mock_run_all.return_value = {"retcode": 1, "stdout": "", "stderr": "no matches"}
-        c = client.UFWClient()
-        # Should not raise an exception
-        rules = c.get_current_rules()
-        assert rules == ""

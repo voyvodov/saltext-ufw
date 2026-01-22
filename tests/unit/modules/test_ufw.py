@@ -161,10 +161,10 @@ def test_reset(execute):
 
 
 def test_add_rule_allow_in_to_port(execute):
-    ufw.add_rule(action="allow", direction="in", to_port="8080", proto="tcp")
+    ufw.add_rule(action="allow", direction="in", dport="8080", proto="tcp")
     cmd = execute.call_args[0][1]
     direction = execute.call_args[1]["direction"]
-    port = execute.call_args[1]["to_port"]
+    port = execute.call_args[1]["dport"]
     proto = execute.call_args[1]["proto"]
     assert direction == "in"
     assert cmd == "rule"
@@ -173,10 +173,10 @@ def test_add_rule_allow_in_to_port(execute):
 
 
 def test_add_rule_deny_out_from_port(execute):
-    ufw.add_rule(action="deny", direction="out", from_port="9090", proto="udp")
+    ufw.add_rule(action="deny", direction="out", sport="9090", proto="udp")
     cmd = execute.call_args[0][1]
     direction = execute.call_args[1]["direction"]
-    port = execute.call_args[1]["from_port"]
+    port = execute.call_args[1]["sport"]
     proto = execute.call_args[1]["proto"]
     assert direction == "out"
     assert cmd == "rule"
@@ -185,18 +185,18 @@ def test_add_rule_deny_out_from_port(execute):
 
 
 def test_add_rule_app_with_ip(execute):
-    ufw.add_rule(action="allow", direction="in", app="Apache", to_ip="192.168.1.1")
+    ufw.add_rule(action="allow", direction="in", app="Apache", dst="192.168.1.1")
     cmd = execute.call_args[0][1]
     app = execute.call_args[1]["app"]
-    to_ip = execute.call_args[1]["to_ip"]
+    dst = execute.call_args[1]["dst"]
     assert cmd == "rule"
     assert app == "Apache"
-    assert to_ip == "192.168.1.1"
+    assert dst == "192.168.1.1"
 
 
 def test_add_rule_invalid_action():
     with pytest.raises(SaltInvocationError):
-        ufw.add_rule(action="invalid_action", direction="in", to_port="8080", proto="tcp")
+        ufw.add_rule(action="invalid_action", direction="in", dport="8080", proto="tcp")
 
 
 def test_add_rule_missing_port():
@@ -206,7 +206,7 @@ def test_add_rule_missing_port():
 
 def test_add_rule_invalid_direction():
     with pytest.raises(SaltInvocationError):
-        ufw.add_rule(action="allow", direction="invalid_direction", to_port="8080", proto="tcp")
+        ufw.add_rule(action="allow", direction="invalid_direction", dport="8080", proto="tcp")
 
 
 def test_add_rule_app_with_no_ip():
@@ -215,62 +215,68 @@ def test_add_rule_app_with_no_ip():
 
 
 def test_add_rule_to_port_no_ip(execute):
-    ufw.add_rule(action="allow", direction="in", to_port="8080", proto="tcp")
+    ufw.add_rule(action="allow", direction="in", dport="8080", proto="tcp")
     cmd = execute.call_args[0][1]
-    from_ip = execute.call_args[1].get("from_ip")
-    to_ip = execute.call_args[1].get("to_ip")
+    src = execute.call_args[1].get("src")
+    dst = execute.call_args[1].get("dst")
     assert cmd == "rule"
-    assert from_ip == "0.0.0.0/0"
-    assert to_ip == "0.0.0.0/0"
+    assert src == "0.0.0.0/0"
+    assert dst == "0.0.0.0/0"
 
 
 def test_add_rule_from_port_no_ip(execute):
-    ufw.add_rule(action="allow", direction="in", from_port="8080", proto="tcp")
+    ufw.add_rule(action="allow", direction="in", sport="8080", proto="tcp")
     cmd = execute.call_args[0][1]
-    from_ip = execute.call_args[1].get("from_ip")
-    to_ip = execute.call_args[1].get("to_ip")
+    src = execute.call_args[1].get("src")
+    dst = execute.call_args[1].get("dst")
     assert cmd == "rule"
-    assert from_ip == "0.0.0.0/0"
-    assert to_ip == "0.0.0.0/0"
+    assert src == "0.0.0.0/0"
+    assert dst == "0.0.0.0/0"
 
 
 def test_remove_rule_allow_in_to_port(execute):
-    ufw.remove_rule(action="allow", direction="in", to_port="8080", proto="tcp")
+    ufw.remove_rule(action="allow", direction="in", dport="8080", proto="tcp")
     cmd = execute.call_args[0][1]
     direction = execute.call_args[1]["direction"]
-    port = execute.call_args[1]["to_port"]
+    port = execute.call_args[1]["dport"]
     proto = execute.call_args[1]["proto"]
+    method = execute.call_args[1].get("method")
     assert direction == "in"
-    assert cmd == "delete"
+    assert method == "delete"
+    assert cmd == "rule"
     assert port == "8080"
     assert proto == "tcp"
 
 
 def test_remove_rule_deny_out_from_port(execute):
-    ufw.remove_rule(action="deny", direction="out", from_port="9090", proto="udp")
+    ufw.remove_rule(action="deny", direction="out", sport="9090", proto="udp")
     cmd = execute.call_args[0][1]
     direction = execute.call_args[1]["direction"]
-    port = execute.call_args[1]["from_port"]
+    port = execute.call_args[1]["sport"]
     proto = execute.call_args[1]["proto"]
+    method = execute.call_args[1].get("method")
     assert direction == "out"
-    assert cmd == "delete"
+    assert method == "delete"
+    assert cmd == "rule"
     assert port == "9090"
     assert proto == "udp"
 
 
 def test_remove_rule_app_with_ip(execute):
-    ufw.remove_rule(action="allow", direction="in", app="Apache", to_ip="192.168.1.1")
+    ufw.remove_rule(action="allow", direction="in", app="Apache", dst="192.168.1.1")
     cmd = execute.call_args[0][1]
     app = execute.call_args[1]["app"]
-    to_ip = execute.call_args[1]["to_ip"]
-    assert cmd == "delete"
+    dst = execute.call_args[1]["dst"]
+    method = execute.call_args[1].get("method")
+    assert cmd == "rule"
+    assert method == "delete"
     assert app == "Apache"
-    assert to_ip == "192.168.1.1"
+    assert dst == "192.168.1.1"
 
 
 def test_remove_rule_invalid_action():
     with pytest.raises(SaltInvocationError):
-        ufw.remove_rule(action="invalid_action", direction="in", to_port="8080", proto="tcp")
+        ufw.remove_rule(action="invalid_action", direction="in", dport="8080", proto="tcp")
 
 
 def test_remove_rule_missing_port():
@@ -280,7 +286,7 @@ def test_remove_rule_missing_port():
 
 def test_remove_rule_invalid_direction():
     with pytest.raises(SaltInvocationError):
-        ufw.remove_rule(action="allow", direction="invalid_direction", to_port="8080", proto="tcp")
+        ufw.remove_rule(action="allow", direction="invalid_direction", dport="8080", proto="tcp")
 
 
 def test_remove_rule_app_with_no_ip():

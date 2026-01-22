@@ -76,7 +76,7 @@ def test_rule_present_adds_rule_and_is_idempotent(ufw_state):
         name=f"allow-port-{port}",
         action="allow",
         direction="in",
-        to_port=port,
+        dport=port,
         proto="tcp",
     )
     assert ret.result is True
@@ -86,7 +86,7 @@ def test_rule_present_adds_rule_and_is_idempotent(ufw_state):
         name=f"allow-port-{port}-is-idempotent",
         action="allow",
         direction="in",
-        to_port=port,
+        dport=port,
         proto="tcp",
     )
     assert ret_again.result is True
@@ -99,7 +99,7 @@ def test_rule_absent_removes_rule(ufw_state):
         name=f"allow-port-{port}",
         action="allow",
         direction="in",
-        to_port=port,
+        dport=port,
         proto="tcp",
     )
     assert ret.result is True
@@ -109,7 +109,7 @@ def test_rule_absent_removes_rule(ufw_state):
         name=f"remove-port-{port}",
         action="allow",
         direction="in",
-        to_port=port,
+        dport=port,
         proto="tcp",
     )
     assert ret.result is True
@@ -119,7 +119,7 @@ def test_rule_absent_removes_rule(ufw_state):
         name=f"remove-port-{port}",
         action="allow",
         direction="in",
-        to_port=port,
+        dport=port,
         proto="tcp",
     )
     assert ret_again.result is True
