@@ -118,11 +118,11 @@ class TestBuildArgs:
         assert result == ["proto tcp"]
 
     @patch("salt.modules.cmdmod.which", return_value="/bin/grep")
-    def test_build_args_with_app(self, _):
-        """Test _build_args with app parameter"""
+    def test_build_args_with_application_name(self, _):
+        """Test _build_args when using an application profile"""
         c = client.UFWClient()
-        result = c._build_args(app="Apache")
-        assert result == ["app Apache"]
+        result = c._build_args(dport="Apache")
+        assert result == ["app 'Apache'"]
 
     @patch("salt.modules.cmdmod.run_all")
     @patch("salt.modules.cmdmod.which", return_value="/bin/grep")

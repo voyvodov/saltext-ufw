@@ -15,11 +15,10 @@ class TestGetFirewallRules:
         assert len(rules) == 1
         parsed = rules[0]
         assert parsed["action"] == "allow"
-        assert parsed["forward"] is True
         assert parsed["interface_in"] == "eth0"
         assert parsed["interface_out"] == "eth1"
         assert parsed["comment"] == "hello"
-        assert parsed["direction"] == "in"
+        assert parsed["direction"] == "forward"
         assert parsed["index"] == 1
 
     def test_decodes_apps_and_skips_invalid_lines(self, monkeypatch):
@@ -45,8 +44,8 @@ class TestGetFirewallRules:
 
 class TestListCurrentRules:
     def test_reads_only_tuple_lines_from_files(self, tmp_path, monkeypatch):
-        tuple_line_one = "### tuple ### allow tcp 22 0.0.0.0/0 any 192.168.1.1/32 in"
-        tuple_line_two = "### tuple ### deny udp 53 0.0.0.0/0 any 192.168.1.1/32 out"
+        tuple_line_one = "### tuple ### allow tcp 22 0.0.0.0/0 any 192.168.1.1/32 in\n"
+        tuple_line_two = "### tuple ### deny udp 53 0.0.0.0/0 any 192.168.1.1/32 out\n"
         mixed_content = f"{tuple_line_one}\nnot a tuple\n{tuple_line_two}\n"
         rules_file = tmp_path / "user.rules"
         rules_file.write_text(mixed_content, encoding="utf-8")

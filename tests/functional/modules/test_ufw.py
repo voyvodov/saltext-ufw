@@ -60,22 +60,22 @@ def test_logging_level(ufw):
     assert status.get("logging") == "off"
 
 
-def test_reset(ufw, ufw_client):
+def test_reset(ufw):
     ufw.add_rule(
         action="allow",
         direction="in",
         dport="25000",
         proto="tcp",
     )
-    rules_before_reset = ufw_client.get_current_rules()
-    assert len(rules_before_reset.strip().splitlines()) > 0
+    rules_before_reset = ufw.list_rules()
+    assert len(rules_before_reset) > 0
 
     ufw.reset()
-    rules_after_reset = ufw_client.get_current_rules()
-    assert rules_after_reset.strip() == ""
+    rules_after_reset = ufw.list_rules()
+    assert len(rules_after_reset) == 0
 
 
-def test_add_rule_port(ufw, ufw_client):
+def test_add_rule_port(ufw):
     # Add a rule to allow port
     ret = ufw.add_rule(
         action="allow",
@@ -85,13 +85,12 @@ def test_add_rule_port(ufw, ufw_client):
     )
 
     assert ret == "Rule added"
-    rules = ufw_client.get_current_rules()
-    rules = rules.splitlines()
+    rules = ufw.list_rules()
 
-    assert "### tuple ### allow tcp 22000 0.0.0.0/0 any 0.0.0.0/0 in" in rules
+    assert "### tuple ### allow tcp 22000 0.0.0.0/0 any 0.0.0.0/0 in\n" in rules
 
 
-def test_add_rule_deny_port(ufw, ufw_client):
+def test_add_rule_deny_port(ufw):
     # Add a rule to deny port
     ret = ufw.add_rule(
         action="deny",
@@ -101,13 +100,12 @@ def test_add_rule_deny_port(ufw, ufw_client):
     )
     assert ret == "Rule added"
 
-    rules = ufw_client.get_current_rules()
-    rules = rules.splitlines()
+    rules = ufw.list_rules()
 
-    assert "### tuple ### deny tcp 23000 0.0.0.0/0 any 0.0.0.0/0 in" in rules
+    assert "### tuple ### deny tcp 23000 0.0.0.0/0 any 0.0.0.0/0 in\n" in rules
 
 
-def test_add_rule_to_ip(ufw, ufw_client):
+def test_add_rule_to_ip(ufw):
     # Add a rule to specific IP
     ret = ufw.add_rule(
         action="allow",
@@ -116,12 +114,11 @@ def test_add_rule_to_ip(ufw, ufw_client):
     )
     assert ret == "Rule added"
 
-    rules = ufw_client.get_current_rules()
-    rules = rules.splitlines()
-    assert "### tuple ### allow any any 12.34.56.78 any 0.0.0.0/0 in" in rules
+    rules = ufw.list_rules()
+    assert "### tuple ### allow any any 12.34.56.78 any 0.0.0.0/0 in\n" in rules
 
 
-def test_add_rule_from_ip(ufw, ufw_client):
+def test_add_rule_from_ip(ufw):
     # Add a rule to specific IP
     ret = ufw.add_rule(
         action="allow",
@@ -130,12 +127,11 @@ def test_add_rule_from_ip(ufw, ufw_client):
     )
     assert ret == "Rule added"
 
-    rules = ufw_client.get_current_rules()
-    rules = rules.splitlines()
-    assert "### tuple ### allow any any 0.0.0.0/0 any 12.34.56.78 in" in rules
+    rules = ufw.list_rules()
+    assert "### tuple ### allow any any 0.0.0.0/0 any 12.34.56.78 in\n" in rules
 
 
-def test_remove_rule(ufw, ufw_client):
+def test_remove_rule(ufw):
     # Add a rule to allow port
     ufw.add_rule(
         action="allow",
@@ -144,9 +140,8 @@ def test_remove_rule(ufw, ufw_client):
         direction="in",
     )
 
-    rules_before = ufw_client.get_current_rules()
-    rules_before = rules_before.splitlines()
-    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in" in rules_before
+    rules_before = ufw.list_rules()
+    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in\n" in rules_before
     # Remove the rule
     ufw.remove_rule(
         action="allow",
@@ -154,26 +149,16 @@ def test_remove_rule(ufw, ufw_client):
         proto="tcp",
         direction="in",
     )
-    rules_after = ufw_client.get_current_rules()
-    rules_after = rules_after.splitlines()
-    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in" not in rules_after
+    rules_after = ufw.list_rules()
+    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in\n" not in rules_after
 
 
-def test_ports_with_app_raise_error(ufw):
+def test_application_name_with_proto_raises_error(ufw):
     with pytest.raises(SaltInvocationError):
         ufw.add_rule(
             action="allow",
-            dport="25000",
-            app="SomeApp",
-            direction="in",
-        )
-
-
-def test_app_without_ips_raise_error(ufw):
-    with pytest.raises(SaltInvocationError):
-        ufw.add_rule(
-            action="allow",
-            app="SomeApp",
+            dport="SomeApp",
+            proto="tcp",
             direction="in",
         )
 
@@ -257,3 +242,64 @@ def test_get_rules_with_index(ufw):
     rule = rules[0]
     assert rule.get("action") == "deny"
     assert rule.get("src") == "10.0.0.2"
+
+
+def test_add_and_remove_route_ports(ufw):
+    initial_rules = ufw.get_rules()
+    ret = ufw.add_route(
+        action="allow",
+        src="10.10.10.1",
+        dst="10.10.10.2",
+        sport="30000",
+        dport="31000",
+        proto="tcp",
+    )
+    assert ret == "Rule added"
+    rules = ufw.get_rules()
+    assert len(rules) == len(initial_rules) + 1
+
+    assert rules[-1]["action"] == "allow"
+    assert rules[-1]["src"] == "10.10.10.1"
+    assert rules[-1]["direction"] == "forward"
+
+    ufw.remove_route(
+        action="allow",
+        src="10.10.10.1",
+        dst="10.10.10.2",
+        sport="30000",
+        dport="31000",
+        proto="tcp",
+    )
+    rules_after = ufw.get_rules()
+    assert len(rules_after) == len(initial_rules)
+
+
+def test_add_and_remove_route_application(ufw):
+    initial_rules = ufw.get_rules()
+    ret = ufw.add_route(
+        action="allow",
+        src="192.168.99.1",
+        dst="192.168.99.2",
+        sport="openssh",
+        dport="openssh",
+    )
+    assert ret == "Rule added"
+    rules = ufw.get_rules()
+    assert len(rules) == len(initial_rules) + 1
+
+    assert rules[-1]["action"] == "allow"
+    assert rules[-1]["src"] == "192.168.99.1"
+    assert rules[-1]["dport"] == "22"
+    assert rules[-1]["sport"] == "22"
+    assert rules[-1]["protocol"] == "tcp"
+    assert rules[-1]["direction"] == "forward"
+
+    ufw.remove_route(
+        action="allow",
+        src="192.168.99.1",
+        dst="192.168.99.2",
+        sport="openssh",
+        dport="openssh",
+    )
+    rules_after = ufw.get_rules()
+    assert len(rules_after) == len(initial_rules)

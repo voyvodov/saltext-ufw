@@ -1,5 +1,7 @@
 import re
 
+PORT_VALUE_RE = re.compile(r"^\d+(?::\d+)?$")
+
 
 def compile_ipv4_regexp():
     r = r"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}"
@@ -40,3 +42,32 @@ def is_starting_by_ipv6(ip):
     if ip is None:
         return False
     return ipv6_regexp.match(ip) is not None
+
+
+def is_port_number(value):
+    """
+    Check if the given value is a valid port number or port range.
+    Valid port number is an integer between 1 and 65535.
+    Valid port range is in the format "start:end" where start and end are
+    integers between 1 and 65535 and start is less than or equal to end.
+    """
+    if value is None:
+        return False
+    if not bool(PORT_VALUE_RE.fullmatch(str(value))):
+        return False
+
+    parts = str(value).split(":")
+    try:
+        if len(parts) == 1:
+            port = int(parts[0])
+            if 1 <= port <= 65535:
+                return True
+        elif len(parts) == 2:
+            start_port = int(parts[0])
+            end_port = int(parts[1])
+            if 1 <= start_port <= 65535 and 1 <= end_port <= 65535 and start_port <= end_port:
+                return True
+    except ValueError:
+        pass
+
+    return False

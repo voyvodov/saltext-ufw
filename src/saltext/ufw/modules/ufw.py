@@ -5,17 +5,25 @@ Salt execution module
 import logging
 import re
 
+from salt.exceptions import CommandExecutionError
 from salt.exceptions import SaltInvocationError
 from salt.utils.path import which
 
 from saltext.ufw.utils.ufw.client import get_client
 from saltext.ufw.utils.ufw.exceptions import UFWCommandError
+from saltext.ufw.utils.ufw.network import is_port_number
 from saltext.ufw.utils.ufw.rules import get_firewall_rules
 from saltext.ufw.utils.ufw.rules import list_current_rules
 
 log = logging.getLogger(__name__)
 
 __virtualname__ = "ufw"
+
+
+def _is_port_number(value):
+    if value is None:
+        return False
+    return bool(PORT_VALUE_RE.fullmatch(str(value)))
 
 
 def __virtual__():
@@ -198,8 +206,9 @@ def default_policy(direction, policy):
             return result["stdout"].strip()
         return result
     except UFWCommandError as err:
-        log.error("Failed to set UFW default policy! %s: %s", type(err).__name__, err)
-        return False
+        raise CommandExecutionError(
+            f"Failed to set UFW default policy! {type(err).__name__}: {err}"
+        ) from err
 
 
 def version():
@@ -218,8 +227,9 @@ def version():
         out = f"{major}.{minor}.{rev}"
         return out
     except UFWCommandError as err:
-        log.error("Failed to get UFW version! %s: %s", type(err).__name__, err)
-        return False
+        raise CommandExecutionError(
+            f"Failed to get UFW version! {type(err).__name__}: {err}"
+        ) from err
 
 
 def reset():
@@ -239,11 +249,10 @@ def reset():
             return result["stdout"].strip()
         return result
     except UFWCommandError as err:
-        log.error("Failed to reset UFW! %s: %s", type(err).__name__, err)
-        return False
+        raise CommandExecutionError(f"Failed to reset UFW! {type(err).__name__}: {err}") from err
 
 
-def _check_rule_params(action, direction, dst, dport, src, sport, app, proto):
+def _check_rule_params(action, direction, dst, dport, src, sport, proto):
 
     if action not in ["allow", "deny", "reject", "limit"]:
         raise SaltInvocationError("Invalid action. Must be 'allow', 'deny', 'reject', or 'limit'.")
@@ -251,18 +260,25 @@ def _check_rule_params(action, direction, dst, dport, src, sport, app, proto):
     if direction and direction not in ["in", "out"]:
         raise SaltInvocationError("Invalid direction. Must be 'in' or 'out'.")
 
-    if app and (dport or sport):
-        raise SaltInvocationError("Cannot specify both application profile and ports.")
+    if dst is None or dst == "":
+        raise SaltInvocationError("Destination (dst) must be specified.")
 
-    if app and not (dst or src):
-        raise SaltInvocationError(
-            "When specifying an application profile, at least one of dst or src must be set."
-        )
+    if src is None or src == "":
+        raise SaltInvocationError("Source (src) must be specified.")
 
-    if proto and not (dport or sport):
-        raise SaltInvocationError(
-            "When specifying a protocol, at least one of dport or sport must be set."
-        )
+    if proto not in (None, "any"):
+        if not (dport or sport):
+            raise SaltInvocationError(
+                "When specifying a protocol, at least one of dport or sport must be set."
+            )
+
+        for field_name, field_value in ("dport", dport), ("sport", sport):
+            if field_value is None:
+                continue
+            if not is_port_number(field_value):
+                raise SaltInvocationError(
+                    f"When specifying a protocol, {field_name} must be a port number."
+                )
 
 
 def add_rule(
@@ -270,12 +286,11 @@ def add_rule(
     action="allow",
     direction=None,
     interface=None,
-    src=None,
+    src="0.0.0.0/0",
     sport=None,
-    dst=None,
+    dst="0.0.0.0/0",
     dport=None,
-    proto=None,
-    app=None,
+    proto="any",
     comment=None,
     dry_run=False,
 ):
@@ -286,7 +301,7 @@ def add_rule(
 
     .. code-block:: bash
 
-        salt '*' ufw.add_rule action=allow direction=in interface=eth0 to_ip=any to_port=2553
+        salt '*' ufw.add_rule action=allow direction=in interface=eth0 dst=any dport=2553
 
     insert
         The position to insert the rule at (1-based index). If not specified, the rule will be appended.
@@ -298,19 +313,15 @@ def add_rule(
         The network interface to apply the rule on.
     src
         The source IP address for the rule.
-        Defaults to 0.0.0.0/0 if ``sport`` or ``dport`` is set.
     sport
-        The source port for the rule.
+        The source port, port range or application name for the rule.
     dst
         The destination IP address for the rule.
-        Defaults to 0.0.0.0/0 if ``sport`` or ``dport`` is set.
     dport
-        The destination port for the rule.
+        The destination port, port range or application name for the rule.
     proto
-        The protocol for the rule (e.g., tcp, udp).
-        If set any of ``to_port``, ``from_port``, ``to_ip``, ``from_ip`` must also be set.
-    app
-        The application profile for the rule. Can be used instead of specifying ports.
+        The protocol for the rule (e.g., tcp, udp or any).
+        If set to something different than "any", ``dport``, ``sport`` must also be set as port numbers.
     comment
         A comment to add to the rule.
     dry_run
@@ -320,16 +331,11 @@ def add_rule(
     if insert and insert < 1:
         raise SaltInvocationError("Rule insert position must be a positive integer.")
 
-    _check_rule_params(action, direction, dst, dport, src, sport, app, proto)
-
-    if (sport or dport) and not src:
-        src = "0.0.0.0/0"
-
-    if (sport or dport) and not dst:
-        dst = "0.0.0.0/0"
+    _check_rule_params(action, direction, dst, dport, src, sport, proto)
 
     client = get_client()
     cmd = "rule"
+
     try:
         result = client.execute(
             cmd,
@@ -343,15 +349,13 @@ def add_rule(
             dst=dst,
             dport=dport,
             proto=proto,
-            app=app,
             comment=comment,
         )
         if isinstance(result, dict):
             return result["stdout"].strip()
         return result
     except UFWCommandError as err:
-        log.error("Failed to add UFW rule! %s: %s", type(err).__name__, err)
-        return False
+        raise CommandExecutionError(f"Failed to add UFW rule! {type(err).__name__}: {err}") from err
 
 
 def remove_rule(
@@ -359,12 +363,11 @@ def remove_rule(
     position=None,
     direction=None,
     interface=None,
-    dst=None,
+    dst="0.0.0.0/0",
     dport=None,
-    src=None,
+    src="0.0.0.0/0",
     sport=None,
-    proto=None,
-    app=None,
+    proto="any",
     dry_run=False,
 ):
     """
@@ -374,7 +377,7 @@ def remove_rule(
 
     .. code-block:: bash
 
-        salt '*' ufw.remove_rule action=allow direction=in interface=eth0 to_ip=any to_port=2553
+        salt '*' ufw.remove_rule action=allow direction=in interface=eth0 dst=any dport=2553
 
     action
         The action of the rule to remove. Possible values: 'allow', 'deny', 'reject', 'limit'.
@@ -386,30 +389,21 @@ def remove_rule(
         The network interface of the rule to remove.
     dst
         The destination IP address of the rule to remove.
-        Defaults to 0.0.0.0/0 if ``from_port`` or ``to_port`` is set.
     dport
-        The destination port of the rule to remove.
+        The destination port, port range or application name of the rule to remove.
     src
         The source IP address of the rule to remove.
-        Defaults to 0.0.0.0/0 if ``from_port`` or ``to_port`` is set.
     sport
-        The source port of the rule to remove.
+        The source port, port range or application name of the rule to remove.
     proto
-        The protocol of the rule to remove (e.g., tcp, udp).
-        If set ``to_port`` or ``from_port`` must also be set.
-    app
-        The application profile of the rule to remove. Can be used instead of specifying ports.
+        The protocol of the rule to remove (e.g., tcp, udp, any).
+        If set to something different than "any", ``dport``, ``sport`` must also be set as port numbers.
+
     dry_run
         If True, the command will be simulated without making any changes.
     """
 
-    _check_rule_params(action, direction, dst, dport, src, sport, app, proto)
-
-    if (sport or dport) and not src:
-        src = "0.0.0.0/0"
-
-    if (sport or dport) and not dst:
-        dst = "0.0.0.0/0"
+    _check_rule_params(action, direction, dst, dport, src, sport, proto)
 
     client = get_client()
 
@@ -436,14 +430,374 @@ def remove_rule(
                 dst=dst,
                 dport=dport,
                 proto=proto,
-                app=app,
             )
 
         if isinstance(result, dict):
             return result["stdout"].strip()
         return result
     except UFWCommandError as err:
-        log.error("Failed to remove UFW rule! %s: %s", type(err).__name__, err)
+        raise CommandExecutionError(
+            f"Failed to remove UFW rule! {type(err).__name__}: {err}"
+        ) from err
+
+
+def add_route(
+    insert=None,
+    action="allow",
+    interface_in=None,
+    interface_out=None,
+    src="0.0.0.0/0",
+    sport=None,
+    dst="0.0.0.0/0",
+    dport=None,
+    proto="any",
+    comment=None,
+    rule_log=False,
+    dry_run=False,
+):
+    """
+    Insert or append a UFW route rule at a specific position.
+
+    .. versionadded:: 0.8.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' ufw.add_route action=allow interface_in=eth0 interface_out=eth1 dport=2553
+
+    insert
+        The position to insert the rule at (1-based index). If not specified, the rule will be appended.
+
+    action
+        The action to take. Possible values: 'allow', 'deny', 'reject', 'limit'.
+
+    interface_in
+        The incoming network interface to apply the rule to. If not specified, the rule applies to all interfaces.
+
+    interface_out
+        The outgoing network interface to apply the rule to. If not specified, the rule applies to all interfaces.
+
+    src
+        The source IP address for the rule.
+
+    sport
+        The source port, port range or application name for the rule.
+
+    dst
+        The destination IP address for the rule.
+
+    dport
+        The destination port, port range or application name for the rule.
+
+    proto
+        The protocol for the rule (e.g., tcp, udp).
+        If set to something different than "any", ``dport``, ``sport`` must also be set as port numbers.
+
+    comment
+        A comment to add to the rule.
+
+    rule_log
+        Can be ``true``, ``false`` or ``all``.
+        If set to ``true``, will log all new connections matching the rule.
+        If set to ``all``, enables logging for all matching packets.
+
+    dry_run
+        If True, the command will be simulated without making any changes.
+    """
+
+    if insert and insert < 1:
+        raise SaltInvocationError("Rule insert position must be a positive integer.")
+
+    _check_rule_params(action, None, dst, dport, src, sport, proto)
+
+    client = get_client()
+    cmd = "route"
+    rule_log = "log-all" if rule_log == "all" else ("log" if rule_log else None)
+    try:
+        result = client.execute(
+            cmd,
+            dry_run=dry_run,
+            insert=insert,
+            action=action,
+            interface_in=interface_in,
+            interface_out=interface_out,
+            src=src,
+            sport=sport,
+            dst=dst,
+            dport=dport,
+            proto=proto,
+            rule_log=rule_log,
+            comment=comment,
+        )
+        if isinstance(result, dict):
+            return result["stdout"].strip()
+        return result
+    except UFWCommandError as err:
+        raise CommandExecutionError(
+            f"Failed to add UFW route rule! {type(err).__name__}: {err}"
+        ) from err
+
+
+def remove_route(
+    action="allow",
+    interface_in=None,
+    interface_out=None,
+    src="0.0.0.0/0",
+    sport=None,
+    dst="0.0.0.0/0",
+    dport=None,
+    proto="any",
+    dry_run=False,
+):
+    """
+    Remove a UFW route rule.
+
+    .. versionadded:: 0.8.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' ufw.remove_route action=allow interface_in=eth0 interface_out=eth1 dport=2553
+
+    action
+        The action of the rule to remove. Possible values: 'allow', 'deny', 'reject', 'limit'.
+
+    position
+        The position of the rule to remove (1-based index). If specified, other parameters are ignored.
+
+    interface_in
+        The incoming network interface to apply the rule to. If not specified, the rule applies to all interfaces.
+
+    interface_out
+        The outgoing network interface to apply the rule to. If not specified, the rule applies to all interfaces.
+
+    src
+        The source IP address of the rule to remove.
+
+    sport
+        The source port, port range or application name for the rule to remove.
+
+    dst
+        The destination IP address of the rule to remove.
+
+    dport
+        The destination port, port range or application name for the rule to remove.
+
+    proto
+        The protocol of the rule to remove (e.g., tcp, udp, any).
+        If set to something different than "any", ``dport`` or ``sport`` must also be set as port numbers.
+
+    dry_run
+        If True, the command will be simulated without making any changes.
+    """
+    _check_rule_params(action, None, dst, dport, src, sport, proto)
+
+    client = get_client()
+
+    cmd = "route"
+
+    try:
+        result = client.execute(
+            cmd,
+            method="delete",
+            dry_run=dry_run,
+            action=action,
+            interface_in=interface_in,
+            interface_out=interface_out,
+            src=src,
+            sport=sport,
+            dst=dst,
+            dport=dport,
+            proto=proto,
+        )
+
+        if isinstance(result, dict):
+            return result["stdout"].strip()
+        return result
+    except UFWCommandError as err:
+        raise CommandExecutionError(
+            f"Failed to remove UFW route rule! {type(err).__name__}: {err}"
+        ) from err
+
+
+def add_route(
+    insert=None,
+    action="allow",
+    src_interface=None,
+    dst_interface=None,
+    src="0.0.0.0/0",
+    sport=None,
+    dst="0.0.0.0/0",
+    dport=None,
+    proto="any",
+    comment=None,
+    rule_log=False,
+    dry_run=False,
+):
+    """
+    Insert or append a UFW route rule at a specific position.
+
+    .. versionadded:: 0.8.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' ufw.add_route action=allow src_interface=eth0 dst_interface=eth1 dport=2553
+
+    insert
+        The position to insert the rule at (1-based index). If not specified, the rule will be appended.
+
+    action
+        The action to take. Possible values: 'allow', 'deny', 'reject', 'limit'.
+
+    in_interface
+        The network interface to apply the rule on for incoming traffic.
+
+    out_interface
+        The network interface to apply the rule on for outgoing traffic.
+
+    src
+        The source IP address for the rule.
+
+    sport
+        The source port or application name for the rule.
+
+    dst
+        The destination IP address for the rule.
+
+    dport
+        The destination port or application name for the rule.
+
+    proto
+        The protocol for the rule (e.g., tcp, udp).
+        If set to something different than "any", ``dport``, ``sport`` must also be set as port numbers.
+
+    comment
+        A comment to add to the rule.
+
+    rule_log
+        Can be ``true``, ``false`` or ``all``.
+        If set to ``true``, will log all new connections matching the rule.
+        If set to ``all``, enables logging for all matching packets.
+
+    dry_run
+        If True, the command will be simulated without making any changes.
+    """
+
+    if insert and insert < 1:
+        raise SaltInvocationError("Rule insert position must be a positive integer.")
+
+    _check_rule_params(action, None, dst, dport, src, sport, proto)
+
+    client = get_client()
+    cmd = "route"
+    rule_log = "log-all" if rule_log == "all" else ("log" if rule_log else None)
+    try:
+        result = client.execute(
+            cmd,
+            dry_run=dry_run,
+            insert=insert,
+            action=action,
+            src_interface=src_interface,
+            dst_interface=dst_interface,
+            src=src,
+            sport=sport,
+            dst=dst,
+            dport=dport,
+            proto=proto,
+            logging=rule_log,
+            comment=comment,
+        )
+        if isinstance(result, dict):
+            return result["stdout"].strip()
+        return result
+    except UFWCommandError as err:
+        log.error("Failed to add UFW route! %s: %s", type(err).__name__, err)
+        return False
+
+
+def remove_route(
+    action="allow",
+    src_interface=None,
+    dst_interface=None,
+    src="0.0.0.0/0",
+    sport=None,
+    dst="0.0.0.0/0",
+    dport=None,
+    proto="any",
+    dry_run=False,
+):
+    """
+    Remove a UFW route rule.
+
+    .. versionadded:: 0.8.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' ufw.remove_route action=allow src_interface=eth0 dst_interface=eth1 dport=2553
+
+    action
+        The action of the rule to remove. Possible values: 'allow', 'deny', 'reject', 'limit'.
+
+    position
+        The position of the rule to remove (1-based index). If specified, other parameters are ignored.
+
+    src_interface
+        The source network interface of the rule to remove.
+
+    dst_interface
+        The destination network interface of the rule to remove.
+
+    src
+        The source IP address of the rule to remove.
+
+    sport
+        The source port or application name for the rule to remove.
+
+    dst
+        The destination IP address of the rule to remove.
+
+    dport
+        The destination port or application name for the rule to remove.
+
+    proto
+        The protocol of the rule to remove (e.g., tcp, udp, any).
+        If set to something different than "any", ``dport`` or ``sport`` must also be set as port numbers.
+
+    dry_run
+        If True, the command will be simulated without making any changes.
+    """
+    _check_rule_params(action, None, dst, dport, src, sport, proto)
+
+    client = get_client()
+
+    cmd = "route"
+
+    try:
+        result = client.execute(
+            cmd,
+            method="delete",
+            dry_run=dry_run,
+            action=action,
+            src_interface=src_interface,
+            dst_interface=dst_interface,
+            src=src,
+            sport=sport,
+            dst=dst,
+            dport=dport,
+            proto=proto,
+        )
+
+        if isinstance(result, dict):
+            return result["stdout"].strip()
+        return result
+    except UFWCommandError as err:
+        log.error("Failed to remove UFW route! %s: %s", type(err).__name__, err)
         return False
 
 
@@ -476,8 +830,9 @@ def logging_level(level):
             return result["stdout"].strip()
         return result
     except UFWCommandError as err:
-        log.error("Failed to set UFW logging level! %s: %s", type(err).__name__, err)
-        return False
+        raise CommandExecutionError(
+            f"Failed to set UFW logging level! {type(err).__name__}: {err}"
+        ) from err
 
 
 def list_rules():
@@ -496,8 +851,9 @@ def list_rules():
 
         return result
     except UFWCommandError as err:
-        log.error("Failed to list UFW rules! %s: %s", type(err).__name__, err)
-        return False
+        raise CommandExecutionError(
+            f"Failed to list UFW rules! {type(err).__name__}: {err}"
+        ) from err
 
 
 def get_rules(index=None):
@@ -528,5 +884,6 @@ def get_rules(index=None):
 
         return result
     except UFWCommandError as err:
-        log.error("Failed to get UFW rules! %s: %s", type(err).__name__, err)
-        return False
+        raise CommandExecutionError(
+            f"Failed to get UFW rules! {type(err).__name__}: {err}"
+        ) from err

@@ -8,6 +8,8 @@ from saltfactories.utils import random_string
 
 from saltext.ufw import PACKAGE_ROOT
 from saltext.ufw.utils.ufw import client as ufw_client_module
+from saltext.ufw.utils.ufw import network as utilnet
+from saltext.ufw.utils.ufw import rules as utilrules
 
 # Reset the root logger to its default level(because salt changed it)
 logging.root.setLevel(logging.WARNING)
@@ -131,7 +133,8 @@ class UFWClientMock:
 
     def cleanup(self):
         try:
-            os.remove(self.mock_firewall_rules_file)
+            # os.remove(self.mock_firewall_rules_file)
+            pass
         except FileNotFoundError:
             pass
 
@@ -210,6 +213,7 @@ class UFWClientMock:
             method = kwargs.get("method") or None
             direction = kwargs.get("direction") or "in"
             action = kwargs.get("action") or "allow"
+            rule_log = kwargs.get("rule_log") or False
             dport = kwargs.get("dport") or "any"
             sport = kwargs.get("sport") or "any"
             proto = kwargs.get("proto") or "any"
@@ -220,7 +224,72 @@ class UFWClientMock:
                 interface = kwargs.get("interface")
                 direction = f"{direction}_{interface}"
 
+            if rule_log:
+                action = f"{action}_{rule_log}"
+
+            app_in = None
+            app_out = None
+
             rule_line = f"### tuple ### {action} {proto} {dport} {dst} {sport} {src} {direction}\n"
+
+            if dport != "any" and not utilnet.is_port_number(dport):
+                app_out = "OpenSSH"
+                dport = "22"
+                proto = "tcp"
+            if sport != "any" and not utilnet.is_port_number(sport):
+                app_in = "OpenSSH"
+                sport = "22"
+                proto = "tcp"
+
+            if app_in is not None or app_out is not None:
+                rule_line = f"### tuple ### {action} {proto} {dport} {dst} {sport} {src} {app_in or '-'} {app_out or '-'} {direction}\n"
+
+            if method == "delete":
+                ret = self._delete_rule(rule_line, dry_run=dry_run)
+            else:
+                ret = self._add_rule(rule_line, dry_run=dry_run)
+
+        if command == "route":
+            method = kwargs.get("method") or None
+            interface_in = kwargs.get("interface_in") or None
+            interface_out = kwargs.get("interface_out") or None
+            action = kwargs.get("action") or "allow"
+            src = kwargs.get("src") or "0.0.0.0/0"
+            dst = kwargs.get("dst") or "0.0.0.0/0"
+            dport = kwargs.get("dport") or None
+            sport = kwargs.get("sport") or None
+            proto = kwargs.get("proto") or "any"
+            rule_log = kwargs.get("rule_log") or False
+
+            if rule_log:
+                action = f"{action}_{rule_log}"
+
+            direction = ""
+            app_in = None
+            app_out = None
+            if interface_in is not None:
+                direction = f"in_{interface_in}"
+            if interface_out is not None:
+                direction = f"out_{interface_out}"
+
+            if interface_in is not None and interface_out is not None:
+                direction = f"in_{interface_in}!out_{interface_out}"
+
+            rule_line = (
+                f"### tuple ### route:{action} {proto} {dport} {dst} {sport} {src} {direction}\n"
+            )
+
+            if not utilnet.is_port_number(dport):
+                app_out = "OpenSSH"
+                dport = "22"
+                proto = "tcp"
+            if not utilnet.is_port_number(sport):
+                app_in = "OpenSSH"
+                sport = "22"
+                proto = "tcp"
+
+            if app_in is not None or app_out is not None:
+                rule_line = f"### tuple ### route:{action} {proto} {dport} {dst} {sport} {src} {app_in or '-'} {app_out or '-'} {direction}\n"
 
             if method == "delete":
                 ret = self._delete_rule(rule_line, dry_run=dry_run)
@@ -230,15 +299,15 @@ class UFWClientMock:
         return ret
 
     def _add_rule(self, rule_line, dry_run=False):
-        current_rules = self.get_current_rules().splitlines()
-        if rule_line.strip() in current_rules:
+        current_rules = utilrules.list_current_rules()
+        if rule_line in current_rules:
             return {
                 "stdout": "Skipping adding existing rule",
                 "stderr": "",
                 "retcode": 0,
             }
         if dry_run:
-            join = "\n".join(current_rules + [rule_line.strip()])
+            join = "".join(current_rules + [rule_line])
             return {
                 "stdout": join,
                 "stderr": "",
@@ -273,8 +342,3 @@ class UFWClientMock:
             "stderr": "",
             "retcode": 0,
         }
-
-    def get_current_rules(self):
-        with open(self.mock_firewall_rules_file, encoding="utf-8") as f:
-            rules = f.read()
-        return rules

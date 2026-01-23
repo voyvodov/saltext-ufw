@@ -59,12 +59,19 @@ def get_firewall_rules():
 
         try:
             action = parts[0]
-            forward = False
+            log_enabled = False
 
             # route rules "route:<action>"
             if ":" in action:
                 action = action.split(":")[1]
-                forward = True
+                dtype = "forward"
+
+            if "_" in action:
+                action, log_enabled = action.split("_")
+                if log_enabled == "log":
+                    log_enabled = True
+                elif log_enabled == "log-all":
+                    log_enabled = "all"
 
             rule = {
                 "action": action,
@@ -78,9 +85,8 @@ def get_firewall_rules():
                 "interface_out": "",
                 "dapp": "",
                 "sapp": "",
-                "forward": forward,
                 "comment": comment,
-                "logtype": "",
+                "log": log_enabled,
             }
             if len(parts) > 7:
                 pat_space = re.compile("%20")
@@ -114,7 +120,7 @@ def list_current_rules():
         except FileNotFoundError:
             continue
 
-        for line in data.splitlines():
+        for line in data.splitlines(True):
             if pat_tuple.match(line):
                 lines.append(line)
 
