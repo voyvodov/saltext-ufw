@@ -9,9 +9,7 @@ _________
 .. autosummary::
     :toctree:
 
-    ufw.client
-    ufw.exceptions
-    ufw.filter
+    ufw
     ufw.network
     ufw.rules
     versions

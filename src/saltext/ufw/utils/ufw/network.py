@@ -32,13 +32,19 @@ ipv4_regexp = compile_ipv4_regexp()
 ipv6_regexp = compile_ipv6_regexp()
 
 
-def is_starting_by_ipv4(ip):
+def is_ipv4(ip):
+    """
+    Check if the given IP address is a valid IPv4 address.
+    """
     if ip is None:
         return False
     return ipv4_regexp.match(ip) is not None
 
 
-def is_starting_by_ipv6(ip):
+def is_ipv6(ip):
+    """
+    Check if the given IP address is a valid IPv6 address.
+    """
     if ip is None:
         return False
     return ipv6_regexp.match(ip) is not None
@@ -47,7 +53,9 @@ def is_starting_by_ipv6(ip):
 def is_port_number(value):
     """
     Check if the given value is a valid port number or port range.
+
     Valid port number is an integer between 1 and 65535.
+
     Valid port range is in the format "start:end" where start and end are
     integers between 1 and 65535 and start is less than or equal to end.
     """

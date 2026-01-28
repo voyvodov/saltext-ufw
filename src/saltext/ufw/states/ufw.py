@@ -7,12 +7,10 @@ import logging
 from salt.exceptions import CommandExecutionError
 from salt.exceptions import SaltInvocationError
 
+from saltext.ufw.utils.ufw import FirewallRule
 from saltext.ufw.utils.ufw import network as utilnet
-from saltext.ufw.utils.ufw.filter import filter_line_that_contains
-from saltext.ufw.utils.ufw.filter import filter_line_that_contains_ipv4
-from saltext.ufw.utils.ufw.filter import filter_line_that_contains_ipv6
-from saltext.ufw.utils.ufw.filter import filter_line_that_not_start_with
-from saltext.ufw.utils.ufw.rules import list_current_rules
+from saltext.ufw.utils.ufw import rules_match
+from saltext.ufw.utils.ufw.rules import get_firewall_rules
 
 log = logging.getLogger(__name__)
 
@@ -25,31 +23,6 @@ def __virtual__():
 
     # Replace this with your own logic
     return __virtualname__
-
-
-def _compare_rules(rules_current, rules_dry, src, dst):
-    changes = {}
-
-    # Filter out non-tuple lines. Those are rules which are not relevant for comparison
-    # We care only about user defined rules which are stored as tuples
-    rules_dry = filter_line_that_not_start_with("### tuple", rules_dry)
-
-    if utilnet.is_starting_by_ipv4(src) or utilnet.is_starting_by_ipv4(dst):
-        rules_current = filter_line_that_contains_ipv4(rules_current)
-        rules_dry = filter_line_that_contains_ipv4(rules_dry)
-        if rules_current != rules_dry:
-            changes["old"] = rules_current
-            changes["new"] = rules_dry
-    elif utilnet.is_starting_by_ipv6(src) or utilnet.is_starting_by_ipv6(dst):
-        rules_current = filter_line_that_contains_ipv6(rules_current)
-        rules_dry = filter_line_that_contains_ipv6(rules_dry)
-        if rules_current != rules_dry:
-            changes["old"] = rules_current
-            changes["new"] = rules_dry
-    elif rules_current != rules_dry:
-        changes["old"] = rules_current
-        changes["new"] = rules_dry
-    return changes
 
 
 def enabled(name):
@@ -72,12 +45,10 @@ def enabled(name):
         "comment": "UFW is already enabled.",
     }
 
-    try:
-        pre_state = __salt__["ufw.status"]()
-    except CommandExecutionError as err:
-        log.error("Failed to get UFW status! %s: %s", type(err).__name__, err)
+    pre_state = __salt__["ufw.status"]()
+    if not pre_state:
+        log.error("Failed to get UFW status!")
         ret["result"] = False
-        ret["comment"] = f"Failed to get UFW status: {err}"
         return ret
 
     if pre_state["status"] == "active":
@@ -90,7 +61,10 @@ def enabled(name):
         return ret
 
     try:
-        __salt__["ufw.enable"]()
+        if not __salt__["ufw.enable"]():
+            log.error("Failed to enable UFW!")
+            ret["result"] = False
+            return ret
         ret["comment"] = "UFW has been enabled."
         ret["changes"] = {"old": "inactive", "new": "active"}
         return ret
@@ -118,12 +92,11 @@ def disabled(name):
         "result": True,
         "comment": "UFW is already disabled.",
     }
-    try:
-        pre_state = __salt__["ufw.status"]()
-    except CommandExecutionError as err:
-        log.error("Failed to get UFW status! %s: %s", type(err).__name__, err)
+
+    pre_state = __salt__["ufw.status"]()
+    if not pre_state:
+        log.error("Failed to get UFW status!")
         ret["result"] = False
-        ret["comment"] = f"Failed to get UFW status: {err}"
         return ret
 
     if pre_state["status"] != "active":
@@ -136,7 +109,10 @@ def disabled(name):
         return ret
 
     try:
-        __salt__["ufw.disable"]()
+        if not __salt__["ufw.disable"]():
+            log.error("Failed to disable UFW!")
+            ret["result"] = False
+            return ret
         ret["comment"] = "UFW has been disabled."
         ret["changes"] = {"old": "active", "new": "inactive"}
         return ret
@@ -186,12 +162,10 @@ def default_policy(
     }
     changes = {}
 
-    try:
-        pre_state = __salt__["ufw.status"]()
-    except CommandExecutionError as err:
-        log.error("Failed to get UFW status! %s: %s", type(err).__name__, err)
+    pre_state = __salt__["ufw.status"]()
+    if not pre_state:
+        log.error("Failed to get UFW status!")
         ret["result"] = False
-        ret["comment"] = f"Failed to get UFW status: {err}"
         return ret
 
     current_default_values = pre_state["default_policy"]
@@ -217,10 +191,13 @@ def default_policy(
             return ret
 
         try:
-            __salt__["ufw.default_policy"](
+            if not __salt__["ufw.default_policy"](
                 policy=policy,
                 direction=direction,
-            )
+            ):
+                ret["result"] = False
+                ret["comment"] = f"Failed to set default policy for {direction} to {policy}."
+                return ret
             ret["comment"] = f"Default policy for {direction} has been set to {policy}."
             return ret
         except CommandExecutionError as err:
@@ -231,10 +208,61 @@ def default_policy(
     return ret
 
 
+def _rule_match(rule):
+    """
+    Check if rule matches existing rules.
+    Returns:
+    (True, existing) if exact match found
+    (False, existing) if similar rule found with differences
+    (False, None) if no match found
+    """
+    existing_rules = get_firewall_rules()
+
+    for r in existing_rules:
+        ex_rule = FirewallRule(
+            action=r["action"],
+            direction=r["direction"],
+            src=r["src"],
+            sport=r["sport"],
+            dst=r["dst"],
+            dport=r["dport"],
+            protocol=r["protocol"],
+            comment=r["comment"],
+        )
+
+        if r.get("dapp", None):
+            ex_rule.set_port(r.get("dapp"), loc="dst")
+        if r.get("sapp", None):
+            ex_rule.set_port(r.get("sapp"), loc="src")
+
+        r_in_iface = r.get("interface_in")
+        r_out_iface = r.get("interface_out")
+
+        if r_in_iface != "":
+            ex_rule.set_interface("in", r_in_iface)
+
+        if r_out_iface != "":
+            ex_rule.set_interface("out", r_out_iface)
+
+        if r["direction"] == "forward":
+            ex_rule.forward = True
+            ex_rule.direction = "in"
+
+        r_match = rules_match(ex_rule, rule)
+
+        if r_match == 0:
+            return True, ex_rule
+
+        if r_match == -1:
+            return False, ex_rule
+
+    return False, None
+
+
 def rule_present(
     name,
     action="allow",
-    insert=None,
+    postion=0,
     direction="in",
     interface=None,
     src="0.0.0.0/0",
@@ -242,6 +270,7 @@ def rule_present(
     dst="0.0.0.0/0",
     dport=None,
     proto="any",
+    logtype=None,
     comment=None,
 ):
     """
@@ -256,8 +285,10 @@ def rule_present(
         The action to take. One of: ``allow``, ``deny``, ``reject``, ``limit``
         Default is ``allow``
 
-    insert
-        The position to insert the rule at. If not specified, the rule is added at the end of the ruleset.
+    position
+        The position of the rule to remove (1-based index).
+        If > 0 the rule will be inserted at the specified position.
+        If -1 the rule will be prepended.
 
     direction
         The direction of the rule. One of: ``in``, ``out``
@@ -281,6 +312,11 @@ def rule_present(
     proto
         The protocol for the rule. One of: ``tcp``, ``udp``, ``any``
         If not ``any``, ``dport`` or ``sport`` must also be set as port numbers.
+
+    logtype
+        Can be ``log`` or ``log-all``.
+        If set to ``log``, will log all new connections matching the rule.
+        If set to ``log-all``, enables logging for all matching packets.
 
     comment
         An optional comment to associate with the rule.
@@ -317,41 +353,43 @@ def rule_present(
                 any of 'dport', 'sport' must also be specified as port numbers."""
             return ret
 
-    try:
-        rules_dry = __salt__["ufw.add_rule"](
-            insert=insert,
-            action=action,
-            direction=direction,
-            interface=interface,
-            src=src,
-            sport=sport,
-            dst=dst,
-            dport=dport,
-            proto=proto,
-            comment=comment,
-            dry_run=True,
-        )
-    except CommandExecutionError as err:
-        log.error("Failed to check UFW rule! %s: %s", type(err).__name__, err)
+    if logtype not in (None, "log", "log-all"):
         ret["result"] = False
-        ret["comment"] = f"Failed to check UFW rule: {err}"
+        ret["comment"] = "logtype must be either 'log', 'log-all', or None."
         return ret
 
-    # Filter out lines with "Skipping"
-    # If the output is empty after that, the rule is already present
-    nb_skipping_line = len(filter_line_that_contains("Skipping", rules_dry))
-    if nb_skipping_line > 0:
-        return ret
-
-    # Get current rules and compare
-    rules_current = list_current_rules()
-
-    changes = _compare_rules(
-        rules_current=rules_current,
-        rules_dry=rules_dry,
+    rule = FirewallRule(
+        action=action,
+        direction=direction,
         src=src,
+        sport=sport,
         dst=dst,
+        dport=dport,
+        protocol=proto,
+        comment=comment,
     )
+    try:
+        if interface is not None:
+            rule.set_interface(direction, interface)
+        rule.position = postion
+        rule.set_logtype(logtype)
+        rule.validate()
+    except ValueError as err:
+        ret["result"] = False
+        ret["comment"] = f"Invalid rule parameter: {err}"
+        return ret
+
+    is_match, existing_rule = _rule_match(rule)
+    if not is_match and existing_rule is not None:
+        changes = {
+            "old": existing_rule.build_rule_string(),
+            "new": rule.build_rule_string(),
+        }
+    elif not is_match:
+        changes = {
+            "old": "",
+            "new": rule.build_rule_string(),
+        }
 
     ret["changes"] = changes
 
@@ -362,17 +400,24 @@ def rule_present(
             return ret
 
         try:
-            __salt__["ufw.add_rule"](
-                action=action,
-                direction=direction,
-                interface=interface,
-                src=src,
-                sport=sport,
-                dst=dst,
-                dport=dport,
-                proto=proto,
-                comment=comment,
-            )
+            if (
+                __salt__["ufw.add_rule"](
+                    action=action,
+                    direction=direction,
+                    interface=interface,
+                    src=src,
+                    sport=sport,
+                    dst=dst,
+                    dport=dport,
+                    proto=proto,
+                    logtype=logtype,
+                    comment=comment,
+                )
+                is False
+            ):
+                ret["result"] = False
+                ret["comment"] = "Failed to add UFW rule."
+                return ret
             ret["comment"] = "The rule has been added."
             return ret
         except CommandExecutionError as err:
@@ -460,32 +505,32 @@ def rule_absent(
                 any of 'dport', 'sport' must also be specified as port numbers."""
             return ret
 
+    rule = FirewallRule(
+        action=action,
+        direction=direction,
+        src=src,
+        sport=sport,
+        dst=dst,
+        dport=dport,
+        protocol=proto,
+    )
     try:
-        rules_dry = __salt__["ufw.remove_rule"](
-            action=action,
-            direction=direction,
-            interface=interface,
-            src=src,
-            sport=sport,
-            dst=dst,
-            dport=dport,
-            proto=proto,
-            dry_run=True,
-        )
-    except CommandExecutionError as err:
-        log.error("Failed to remove UFW rule in dry-run mode! %s: %s", type(err).__name__, err)
+        if interface is not None:
+            rule.set_interface(direction, interface)
+        rule.delete = True
+        rule.validate()
+    except ValueError as err:
         ret["result"] = False
-        ret["comment"] = f"Failed to remove UFW rule in dry-run mode: {err}"
+        ret["comment"] = f"Invalid rule parameter: {err}"
         return ret
 
-    rules_current = list_current_rules()
-
-    changes = _compare_rules(
-        rules_current=rules_current,
-        rules_dry=rules_dry,
-        src=src,
-        dst=dst,
-    )
+    _, existing_rule = _rule_match(rule)
+    # Only if we have match (don't care about log level or comment) and action is the same!
+    if existing_rule is not None and action == existing_rule.action:
+        changes = {
+            "old": existing_rule.build_rule_string(),
+            "new": "",
+        }
 
     ret["changes"] = changes
 
@@ -496,16 +541,22 @@ def rule_absent(
             return ret
 
         try:
-            __salt__["ufw.remove_rule"](
-                action=action,
-                direction=direction,
-                interface=interface,
-                src=src,
-                sport=sport,
-                dst=dst,
-                dport=dport,
-                proto=proto,
-            )
+            if (
+                __salt__["ufw.remove_rule"](
+                    action=action,
+                    direction=direction,
+                    interface=interface,
+                    src=src,
+                    sport=sport,
+                    dst=dst,
+                    dport=dport,
+                    proto=proto,
+                )
+                is False
+            ):
+                ret["result"] = False
+                ret["comment"] = "Failed to remove UFW rule."
+                return ret
             ret["comment"] = "The rule has been removed."
             return ret
         except CommandExecutionError as err:
@@ -520,7 +571,7 @@ def rule_absent(
 def route_present(
     name,
     action="allow",
-    insert=None,
+    position=0,
     interface_in=None,
     interface_out=None,
     src="0.0.0.0/0",
@@ -528,8 +579,8 @@ def route_present(
     dst="0.0.0.0/0",
     dport=None,
     proto="any",
+    logtype=None,
     comment=None,
-    rule_log=False,
 ):
     """
     Ensure the UFW route rule is present as specified.
@@ -541,8 +592,10 @@ def route_present(
     action
         The action to take. One of: ``allow``, ``deny``, ``reject``, ``limit``
 
-    insert
-        The position to insert the rule at. If not specified, the rule is added at the end of the ruleset.
+    position
+        The position of the rule to remove (1-based index).
+        If > 0 the rule will be inserted at the specified position.
+        If -1 the rule will be prepended.
 
     interface_in
         The incoming network interface to apply the rule to. If not specified, the rule applies to all interfaces.
@@ -566,14 +619,13 @@ def route_present(
         The protocol for the rule. One of: ``tcp``, ``udp``, ``any``
         If not ``any``, ``dport`` or ``sport`` must also be set as port numbers.
 
+    logtype
+        Can be ``log`` or ``log-all``.
+        If set to ``log``, will log all new connections matching the rule.
+        If set to ``log-all``, enables logging for all matching packets.
+
     comment
         An optional comment to associate with the rule.
-
-    rule_log
-        Can be ``true``, ``false`` or ``all``.
-        If set to ``true``, will log all new connections matching the rule.
-        If set to ``all``, enables logging for all matching packets.
-
 
     .. code-block:: yaml
 
@@ -631,42 +683,46 @@ def route_present(
                 any of 'dport', 'sport' must also be specified as port numbers."""
             return ret
 
-    try:
-        rules_dry = __salt__["ufw.add_route"](
-            insert=insert,
-            action=action,
-            interface_in=interface_in,
-            interface_out=interface_out,
-            src=src,
-            sport=sport,
-            dst=dst,
-            dport=dport,
-            proto=proto,
-            comment=comment,
-            rule_log=rule_log,
-            dry_run=True,
-        )
-    except CommandExecutionError as err:
-        log.error("Failed to add UFW route rule in dry-run mode! %s: %s", type(err).__name__, err)
+    if logtype not in (None, "log", "log-all"):
         ret["result"] = False
-        ret["comment"] = f"Failed to add UFW route rule in dry-run mode: {err}"
+        ret["comment"] = "logtype must be either 'log', 'log-all', or None."
         return ret
 
-    # Filter out lines with "Skipping"
-    # If the output is empty after that, the rule is already present
-    nb_skipping_line = len(filter_line_that_contains("Skipping", rules_dry))
-    if nb_skipping_line > 0:
-        return ret
-
-    # Get current rules and compare
-    rules_current = list_current_rules()
-
-    changes = _compare_rules(
-        rules_current=rules_current,
-        rules_dry=rules_dry,
-        src=src,
+    rule = FirewallRule(
+        action=action,
+        dport=dport,
         dst=dst,
+        src=src,
+        sport=sport,
+        protocol=proto,
+        forward=True,
+        comment=comment,
     )
+
+    try:
+        if interface_in is not None:
+            rule.set_interface("in", interface_in)
+        if interface_out is not None:
+            rule.set_interface("out", interface_out)
+        rule.position = position
+        rule.set_logtype(logtype)
+        rule.validate()
+    except ValueError as err:
+        ret["result"] = False
+        ret["comment"] = f"Invalid rule parameter: {err}"
+        return ret
+
+    is_match, existing_rule = _rule_match(rule)
+    if not is_match and existing_rule is not None:
+        changes = {
+            "old": existing_rule.build_rule_string(),
+            "new": rule.build_rule_string(),
+        }
+    elif not is_match:
+        changes = {
+            "old": "",
+            "new": rule.build_rule_string(),
+        }
 
     ret["changes"] = changes
 
@@ -677,18 +733,24 @@ def route_present(
             return ret
 
         try:
-            __salt__["ufw.add_route"](
-                action=action,
-                interface_in=interface_in,
-                interface_out=interface_out,
-                src=src,
-                sport=sport,
-                dst=dst,
-                dport=dport,
-                proto=proto,
-                rule_log=rule_log,
-                comment=comment,
-            )
+            if (
+                __salt__["ufw.add_route"](
+                    action=action,
+                    interface_in=interface_in,
+                    interface_out=interface_out,
+                    src=src,
+                    sport=sport,
+                    dst=dst,
+                    dport=dport,
+                    proto=proto,
+                    logtype=logtype,
+                    comment=comment,
+                )
+                is False
+            ):
+                ret["result"] = False
+                ret["comment"] = "Failed to add UFW route rule."
+                return ret
             ret["comment"] = "The route rulehas been added."
             return ret
         except CommandExecutionError as err:
@@ -792,31 +854,34 @@ def route_absent(
                 any of 'dport', 'sport' must also be specified as port numbers."""
             return ret
 
+    rule = FirewallRule(
+        action=action,
+        dst=dst,
+        dport=dport,
+        src=src,
+        sport=sport,
+        protocol=proto,
+        forward=True,
+    )
     try:
-        rules_dry = __salt__["ufw.remove_route"](
-            action=action,
-            interface_in=interface_in,
-            interface_out=interface_out,
-            src=src,
-            sport=sport,
-            dst=dst,
-            dport=dport,
-            proto=proto,
-            dry_run=True,
-        )
-    except CommandExecutionError as err:
+        if interface_in is not None:
+            rule.set_interface("in", interface_in)
+        if interface_out is not None:
+            rule.set_interface("out", interface_out)
+        rule.delete = True
+        rule.validate()
+    except ValueError as err:
         ret["result"] = False
-        ret["comment"] = f"Failed to remove UFW route rule in dry-run mode: {err}"
+        ret["comment"] = f"Invalid rule parameter: {err}"
         return ret
 
-    rules_current = list_current_rules()
-
-    changes = _compare_rules(
-        rules_current=rules_current,
-        rules_dry=rules_dry,
-        src=src,
-        dst=dst,
-    )
+    _, existing_rule = _rule_match(rule)
+    # Only if we have match (don't care about log level or comment) and action is the same!
+    if existing_rule is not None and action == existing_rule.action:
+        changes = {
+            "old": existing_rule.build_rule_string(),
+            "new": "",
+        }
 
     ret["changes"] = changes
 
@@ -827,16 +892,22 @@ def route_absent(
             return ret
 
         try:
-            __salt__["ufw.remove_route"](
-                action=action,
-                interface_in=interface_in,
-                interface_out=interface_out,
-                src=src,
-                sport=sport,
-                dst=dst,
-                dport=dport,
-                proto=proto,
-            )
+            if (
+                __salt__["ufw.remove_route"](
+                    action=action,
+                    interface_in=interface_in,
+                    interface_out=interface_out,
+                    src=src,
+                    sport=sport,
+                    dst=dst,
+                    dport=dport,
+                    proto=proto,
+                )
+                is False
+            ):
+                ret["result"] = False
+                ret["comment"] = "Failed to remove UFW route rule."
+                return ret
             ret["comment"] = "The route rule has been removed."
             return ret
         except CommandExecutionError as err:

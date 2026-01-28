@@ -102,92 +102,92 @@ class TestIPv6Regexp:
 class TestIsStartingByIPv4:
     def test_valid_ipv4_returns_true(self):
         """Test that valid IPv4 addresses return True"""
-        assert network.is_starting_by_ipv4("192.168.1.1") is True
-        assert network.is_starting_by_ipv4("10.0.0.1") is True
-        assert network.is_starting_by_ipv4("172.16.0.1") is True
-        assert network.is_starting_by_ipv4("8.8.8.8") is True
+        assert network.is_ipv4("192.168.1.1") is True
+        assert network.is_ipv4("10.0.0.1") is True
+        assert network.is_ipv4("172.16.0.1") is True
+        assert network.is_ipv4("8.8.8.8") is True
 
     def test_ipv4_with_suffix_returns_true(self):
         """Test IPv4 at start of string with additional text"""
-        assert network.is_starting_by_ipv4("192.168.1.1/24") is True
-        assert network.is_starting_by_ipv4("10.0.0.1:8080") is True
-        assert network.is_starting_by_ipv4("172.16.0.1 server") is True
+        assert network.is_ipv4("192.168.1.1/24") is True
+        assert network.is_ipv4("10.0.0.1:8080") is True
+        assert network.is_ipv4("172.16.0.1 server") is True
 
     def test_ipv4_not_at_start_returns_false(self):
         """Test that IPv4 not at start returns False"""
-        assert network.is_starting_by_ipv4("Server at 192.168.1.1") is False
-        assert network.is_starting_by_ipv4(" 192.168.1.1") is False
+        assert network.is_ipv4("Server at 192.168.1.1") is False
+        assert network.is_ipv4(" 192.168.1.1") is False
 
     def test_none_returns_false(self):
         """Test that None returns False"""
-        assert network.is_starting_by_ipv4(None) is False
+        assert network.is_ipv4(None) is False
 
     def test_empty_string_returns_false(self):
         """Test that empty string returns False"""
-        assert network.is_starting_by_ipv4("") is False
+        assert network.is_ipv4("") is False
 
     def test_invalid_ip_returns_false(self):
         """Test that invalid IP addresses return False"""
-        assert network.is_starting_by_ipv4("256.256.256.256") is False
-        assert network.is_starting_by_ipv4("not an ip") is False
-        assert network.is_starting_by_ipv4("abc.def.ghi.jkl") is False
+        assert network.is_ipv4("256.256.256.256") is False
+        assert network.is_ipv4("not an ip") is False
+        assert network.is_ipv4("abc.def.ghi.jkl") is False
 
     def test_ipv6_returns_false(self):
         """Test that IPv6 addresses return False"""
-        assert network.is_starting_by_ipv4("2001:db8::1") is False
-        assert network.is_starting_by_ipv4("::1") is False
+        assert network.is_ipv4("2001:db8::1") is False
+        assert network.is_ipv4("::1") is False
 
     def test_partial_ipv4_returns_false(self):
         """Test that partial IPv4 returns False"""
-        assert network.is_starting_by_ipv4("192.168.1") is False
-        assert network.is_starting_by_ipv4("10.0") is False
+        assert network.is_ipv4("192.168.1") is False
+        assert network.is_ipv4("10.0") is False
 
 
 class TestIsStartingByIPv6:
     def test_valid_ipv6_returns_true(self):
         """Test that valid IPv6 addresses return True"""
-        assert network.is_starting_by_ipv6("2001:db8::1") is True
-        assert network.is_starting_by_ipv6("::1") is True
-        assert network.is_starting_by_ipv6("fe80::1") is True
-        assert network.is_starting_by_ipv6("::") is True
+        assert network.is_ipv6("2001:db8::1") is True
+        assert network.is_ipv6("::1") is True
+        assert network.is_ipv6("fe80::1") is True
+        assert network.is_ipv6("::") is True
 
     def test_ipv6_with_suffix_returns_true(self):
         """Test IPv6 at start of string with additional text"""
-        assert network.is_starting_by_ipv6("2001:db8::1/64") is True
-        assert network.is_starting_by_ipv6("fe80::1 interface") is True
+        assert network.is_ipv6("2001:db8::1/64") is True
+        assert network.is_ipv6("fe80::1 interface") is True
 
     def test_full_ipv6_returns_true(self):
         """Test full IPv6 notation"""
-        assert network.is_starting_by_ipv6("2001:0db8:85a3:0000:0000:8a2e:0370:7334") is True
+        assert network.is_ipv6("2001:0db8:85a3:0000:0000:8a2e:0370:7334") is True
 
     def test_ipv4_mapped_ipv6_returns_true(self):
         """Test IPv4-mapped IPv6 addresses"""
-        assert network.is_starting_by_ipv6("::ffff:192.168.1.1") is True
+        assert network.is_ipv6("::ffff:192.168.1.1") is True
 
     def test_ipv6_not_at_start_returns_false(self):
         """Test that IPv6 not at start returns False"""
-        assert network.is_starting_by_ipv6("Server at 2001:db8::1") is False
-        assert network.is_starting_by_ipv6(" 2001:db8::1") is False
+        assert network.is_ipv6("Server at 2001:db8::1") is False
+        assert network.is_ipv6(" 2001:db8::1") is False
 
     def test_none_returns_false(self):
         """Test that None returns False"""
-        assert network.is_starting_by_ipv6(None) is False
+        assert network.is_ipv6(None) is False
 
     def test_empty_string_returns_false(self):
         """Test that empty string returns False"""
-        assert network.is_starting_by_ipv6("") is False
+        assert network.is_ipv6("") is False
 
     def test_invalid_ipv6_returns_false(self):
         """Test that invalid IPv6 addresses return False"""
-        assert network.is_starting_by_ipv6("not an ip") is False
-        assert network.is_starting_by_ipv6("gggg::1") is False
+        assert network.is_ipv6("not an ip") is False
+        assert network.is_ipv6("gggg::1") is False
 
     def test_ipv4_returns_false(self):
         """Test that IPv4 addresses return False"""
-        assert network.is_starting_by_ipv6("192.168.1.1") is False
-        assert network.is_starting_by_ipv6("10.0.0.1") is False
+        assert network.is_ipv6("192.168.1.1") is False
+        assert network.is_ipv6("10.0.0.1") is False
 
     def test_link_local_ipv6_returns_true(self):
         """Test link-local IPv6 addresses"""
-        assert network.is_starting_by_ipv6("fe80::1") is True
-        assert network.is_starting_by_ipv6("fe80::") is True
+        assert network.is_ipv6("fe80::1") is True
+        assert network.is_ipv6("fe80::") is True
