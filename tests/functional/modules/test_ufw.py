@@ -1,305 +1,388 @@
-import logging
+from types import MethodType
+from unittest.mock import MagicMock
 
 import pytest
 from salt.exceptions import SaltInvocationError
 
-pytestmark = [
-    pytest.mark.skip_if_binaries_missing("ufw"),
-]
-
-
-log = logging.getLogger(__name__)
+from saltext.ufw.modules import ufw
+from saltext.ufw.utils.ufw import UFWClient
 
 
 @pytest.fixture
-def ufw(modules, ufw_client):
-    ufw_client.reset()
-    yield modules.ufw
-    ufw_client.cleanup()
+def configure_loader_modules():
+    return {ufw: {"__grains__": {"id": "test-minion"}}}
 
 
-def test_status(ufw):
+def status_out(state, default_policy, log_level):
+    return (
+        f"Status: {state}\n"
+        f"Logging: {log_level}\n"
+        f"Default: {default_policy.get('incoming', 'deny')} (incoming), "
+        f"{default_policy.get('outgoing', 'allow')} (outgoing), "
+        f"{default_policy.get('routed', 'deny')} (routed)"
+    )
+
+
+def _last_command(execute):
+    args, _ = execute.call_args
+    return args[0]
+
+
+def _captured_rule(client):
+    assert client._captured_rule is not None
+    return client._captured_rule
+
+
+@pytest.fixture
+def state():
+    return "active"
+
+
+@pytest.fixture
+def policy():
+    return {"incoming": "deny", "outgoing": "allow", "routed": "deny"}
+
+
+@pytest.fixture
+def log_level():
+    return "low"
+
+
+@pytest.fixture
+def client(monkeypatch):
+    c = UFWClient()
+    execute_fn = MagicMock(return_value={"stdout": ""})
+    c._execute = execute_fn
+    c._captured_rule = None
+
+    def _update_rule(self, fwrule, dry_run=False):
+        self._captured_rule = fwrule
+        cmd = [self.ufw_path]
+        if dry_run:
+            cmd.append("--dry-run")
+        rule_def = fwrule.build_rule_string()
+
+        cmd.append(rule_def)
+        c._execute(" ".join(cmd))
+
+    c.update_rule = MethodType(_update_rule, c)
+
+    monkeypatch.setattr(ufw, "get_client", lambda: c)
+    return c
+
+
+@pytest.fixture
+def execute(client):
+    return client._execute
+
+
+@pytest.fixture
+def read_status(client, state, policy, log_level):
+    mocked = MagicMock(return_value=status_out(state, policy, log_level))
+    client.status = mocked
+    yield mocked
+
+
+def test_reload_returns_stdout(execute):
+    execute.return_value = {"stdout": "reloaded\n"}
+    assert ufw.reload() == "reloaded"
+    assert _last_command(execute) == "/usr/sbin/ufw reload"
+
+
+@pytest.mark.parametrize("level", ["off", "low", "medium", "high", "full"])
+def test_logging_level_sets_status(read_status, state, policy, level):
+    read_status.return_value = status_out(state, policy, level)
+    ufw.logging_level(level)
     status = ufw.status()
-    assert "status" in status
-    assert status["status"] in ["active", "inactive"]
-    assert "default_policy" in status
-    assert "incoming" in status["default_policy"]
-    assert "outgoing" in status["default_policy"]
-    assert "routed" in status["default_policy"]
+    assert status["logging"] == level
 
 
-def test_status_raw(ufw):
-    status = ufw.status(raw=True)
-    assert isinstance(status, str)
-    assert "Status:" in status
-    assert "Default:" in status
-
-
-def test_reload(ufw):
-    # This test assumes UFW is already enabled
-    ufw.reload()
-    assert True  # If no exception is raised, the test passes
-    status = ufw.status()
-    assert status["status"] == "active"
-
-
-def test_logging_level(ufw):
-    # Set logging level to 'low'
-    ufw.logging_level("low")
-    status = ufw.status()
-    assert status.get("logging") == "low"
-
-    # Set logging level to 'full'
-    ufw.logging_level("full")
-    status = ufw.status()
-    assert status.get("logging") == "full"
-
-    # Set logging level to 'off'
-    ufw.logging_level("off")
-    status = ufw.status()
-    assert status.get("logging") == "off"
-
-
-def test_reset(ufw):
-    ufw.add_rule(
-        action="allow",
-        direction="in",
-        dport="25000",
-        proto="tcp",
-    )
-    rules_before_reset = ufw.list_rules()
-    assert len(rules_before_reset) > 0
-
-    ufw.reset()
-    rules_after_reset = ufw.list_rules()
-    assert len(rules_after_reset) == 0
-
-
-def test_add_rule_port(ufw):
-    # Add a rule to allow port
-    ret = ufw.add_rule(
-        action="allow",
-        dport="22000",
-        proto="tcp",
-        direction="in",
-    )
-
-    assert ret == "Rule added"
-    rules = ufw.list_rules()
-
-    assert "### tuple ### allow tcp 22000 0.0.0.0/0 any 0.0.0.0/0 in\n" in rules
-
-
-def test_add_rule_deny_port(ufw):
-    # Add a rule to deny port
-    ret = ufw.add_rule(
-        action="deny",
-        dport="23000",
-        proto="tcp",
-        direction="in",
-    )
-    assert ret == "Rule added"
-
-    rules = ufw.list_rules()
-
-    assert "### tuple ### deny tcp 23000 0.0.0.0/0 any 0.0.0.0/0 in\n" in rules
-
-
-def test_add_rule_to_ip(ufw):
-    # Add a rule to specific IP
-    ret = ufw.add_rule(
-        action="allow",
-        direction="in",
-        dst="12.34.56.78",
-    )
-    assert ret == "Rule added"
-
-    rules = ufw.list_rules()
-    assert "### tuple ### allow any any 12.34.56.78 any 0.0.0.0/0 in\n" in rules
-
-
-def test_add_rule_from_ip(ufw):
-    # Add a rule to specific IP
-    ret = ufw.add_rule(
-        action="allow",
-        direction="in",
-        src="12.34.56.78",
-    )
-    assert ret == "Rule added"
-
-    rules = ufw.list_rules()
-    assert "### tuple ### allow any any 0.0.0.0/0 any 12.34.56.78 in\n" in rules
-
-
-def test_remove_rule(ufw):
-    # Add a rule to allow port
-    ufw.add_rule(
-        action="allow",
-        dport="24000",
-        proto="tcp",
-        direction="in",
-    )
-
-    rules_before = ufw.list_rules()
-    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in\n" in rules_before
-    # Remove the rule
-    ufw.remove_rule(
-        action="allow",
-        dport="24000",
-        proto="tcp",
-        direction="in",
-    )
-    rules_after = ufw.list_rules()
-    assert "### tuple ### allow tcp 24000 0.0.0.0/0 any 0.0.0.0/0 in\n" not in rules_after
-
-
-def test_application_name_with_proto_raises_error(ufw):
+def test_logging_level_invalid():
     with pytest.raises(SaltInvocationError):
-        ufw.add_rule(
-            action="allow",
-            dport="SomeApp",
-            proto="tcp",
-            direction="in",
-        )
+        ufw.logging_level("invalid")
 
 
-def test_list_rules(ufw):
-    # Add some rules first
-    ufw.add_rule(
+@pytest.mark.parametrize(
+    "target_policy",
+    [
+        {"incoming": "deny", "outgoing": "allow", "routed": "deny"},
+        {"incoming": "allow", "outgoing": "reject", "routed": "deny"},
+        {"incoming": "reject", "outgoing": "deny", "routed": "allow"},
+    ],
+)
+def test_default_policy_is_reflected(read_status, state, log_level, target_policy):
+    read_status.return_value = status_out(state, target_policy, log_level)
+    ufw.default_policy("incoming", target_policy["incoming"])
+    ufw.default_policy("outgoing", target_policy["outgoing"])
+    ufw.default_policy("routed", target_policy["routed"])
+    status = ufw.status()
+    assert status["default_policy"] == target_policy
+
+
+def test_default_policy_invalid_direction():
+    with pytest.raises(SaltInvocationError):
+        ufw.default_policy("sideways", "allow")
+
+
+def test_default_policy_invalid_policy():
+    with pytest.raises(SaltInvocationError):
+        ufw.default_policy("incoming", "invalid")
+
+
+def test_reset(execute):
+    execute.return_value = {"stdout": "reset\n"}
+    assert ufw.reset() == "reset"
+    assert _last_command(execute) == "/usr/sbin/ufw reset"
+
+
+def test_add_rule_allow_in_to_port(client, execute):
+    ufw.add_rule(action="allow", direction="in", dport="8080", proto="tcp")
+    rule = _captured_rule(client)
+    assert rule.direction == "in"
+    assert rule.dport == "8080"
+    assert rule.protocol == "tcp"
+    assert (
+        _last_command(execute)
+        == "/usr/sbin/ufw rule allow proto tcp from 0.0.0.0/0 to 0.0.0.0/0 port 8080"
+    )
+
+
+def test_add_rule_deny_out_from_port(client, execute):
+    ufw.add_rule(action="deny", direction="out", sport="9090", proto="udp")
+    rule = _captured_rule(client)
+    assert rule.direction == "out"
+    assert rule.sport == "9090"
+    assert rule.protocol == "udp"
+    assert "rule deny" in _last_command(execute)
+
+
+def test_add_rule_port_range_with_proto(client):
+    ufw.add_rule(action="allow", direction="in", dport="1000:1010", proto="tcp")
+    rule = _captured_rule(client)
+    assert rule.dport == "1000:1010"
+    assert rule.protocol == "tcp"
+
+
+def test_add_rule_application_name_sets_dapp(client):
+    ufw.add_rule(action="allow", direction="in", dport="Apache", dst="192.168.1.1")
+    rule = _captured_rule(client)
+    assert rule.dapp == "Apache"
+    assert rule.dst == "192.168.1.1"
+    assert rule.protocol == "any"
+
+
+def test_add_rule_application_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_rule(action="allow", direction="in", dport="Apache", proto="tcp")
+
+
+def test_add_rule_sport_application_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_rule(action="allow", direction="out", sport="MyApp", proto="udp")
+
+
+def test_add_rule_sport_application_name_allowed_with_any_proto(client):
+    ufw.add_rule(action="deny", direction="out", sport="MyApp")
+    rule = _captured_rule(client)
+    assert rule.sapp == "MyApp"
+    assert rule.protocol == "any"
+
+
+def test_add_rule_invalid_action():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_rule(action="invalid_action", direction="in", dport="8080", proto="tcp")
+
+
+def test_add_rule_missing_port():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_rule(action="allow", direction="in", proto="tcp")
+
+
+def test_add_rule_invalid_direction():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_rule(action="allow", direction="invalid_direction", dport="8080", proto="tcp")
+
+
+def test_add_rule_default_addresses(client):
+    ufw.add_rule(action="allow", direction="in", dport="8080", proto="tcp")
+    rule = _captured_rule(client)
+    assert rule.src == "0.0.0.0/0"
+    assert rule.dst == "0.0.0.0/0"
+
+
+def test_remove_rule_allow_in_to_port(client):
+    ufw.remove_rule(action="allow", direction="in", dport="8080", proto="tcp")
+    rule = _captured_rule(client)
+    assert rule.delete is True
+    assert rule.direction == "in"
+    assert rule.dport == "8080"
+
+
+def test_remove_rule_deny_out_from_port(client):
+    ufw.remove_rule(action="deny", direction="out", sport="9090", proto="udp")
+    rule = _captured_rule(client)
+    assert rule.delete is True
+    assert rule.direction == "out"
+    assert rule.sport == "9090"
+
+
+def test_remove_rule_application_name(client):
+    ufw.remove_rule(action="allow", direction="in", dport="Apache")
+    rule = _captured_rule(client)
+    assert rule.delete is True
+    assert rule.dapp == "Apache"
+    assert rule.protocol == "any"
+
+
+def test_remove_rule_invalid_action():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_rule(action="invalid_action", direction="in", dport="8080", proto="tcp")
+
+
+def test_remove_rule_missing_port():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_rule(action="allow", direction="in", proto="tcp")
+
+
+def test_remove_rule_application_name_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_rule(action="allow", direction="in", dport="Apache", proto="tcp")
+
+
+def test_remove_rule_sport_application_name_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_rule(action="allow", direction="in", sport="Daemon", proto="udp")
+
+
+def test_remove_rule_invalid_direction():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_rule(action="allow", direction="invalid_direction", dport="8080", proto="tcp")
+
+
+def test_add_route_basic(client):
+    ufw.add_route(
         action="allow",
-        dport="26000",
+        interface_in="eth0",
+        interface_out="eth1",
+        dport="8443",
         proto="tcp",
-        direction="in",
+        comment="text",
     )
-    ufw.add_rule(
-        action="deny",
-        dport="27000",
-        proto="udp",
-        direction="in",
-    )
-
-    rules = ufw.list_rules()
-    assert isinstance(rules, list)
-    assert len(rules) >= 2
-    # Check that rules contain expected information
-    assert any("26000" in str(rule) for rule in rules)
-    assert any("27000" in str(rule) for rule in rules)
+    rule = _captured_rule(client)
+    assert rule.forward is True
+    assert rule.interface_in == "eth0"
+    assert rule.interface_out == "eth1"
+    assert rule.dport == "8443"
+    assert rule.comment == "text"
 
 
-def test_get_rules(ufw):
-    # Add some rules first
-    ufw.add_rule(
+def test_add_route_with_numeric_ports(client):
+    ufw.add_route(
         action="allow",
-        dport="28000",
-        proto="tcp",
-        direction="in",
-    )
-    ufw.add_rule(
-        action="deny",
         src="10.0.0.1",
-        direction="in",
+        dst="10.0.0.2",
+        sport="55000",
+        dport="56000",
+        proto="udp",
     )
-
-    rules = ufw.get_rules()
-    assert isinstance(rules, list)
-    assert len(rules) == 2
-    # Check that rules dictionary contains numbered entries
-    frule = rules[0]
-    srule = rules[1]
-
-    assert frule.get("dport") == "28000"
-    assert frule.get("protocol") == "tcp"
-    assert frule.get("action") == "allow"
-
-    assert srule.get("src") == "10.0.0.1"
-    assert srule.get("action") == "deny"
+    rule = _captured_rule(client)
+    assert rule.sport == "55000"
+    assert rule.dport == "56000"
+    assert rule.protocol == "udp"
 
 
-def test_get_rules_with_index(ufw):
-    # Add some rules first
-    ufw.add_rule(
-        action="allow",
-        dport="29000",
-        proto="tcp",
-        direction="in",
-    )
-    ufw.add_rule(
+@pytest.mark.parametrize("logtype,expected", [("log", "log"), ("log-all", "log-all"), (None, "")])
+def test_add_route_logging_modes(client, logtype, expected):
+    ufw.add_route(action="allow", src="1.2.3.4", dst="5.6.7.8", logtype=logtype)
+    rule = _captured_rule(client)
+    assert rule.logtype == expected
+
+
+def test_add_route_application_name_sets_dapp(client):
+    ufw.add_route(action="allow", dport="Storage")
+    rule = _captured_rule(client)
+    assert rule.dapp == "Storage"
+    assert rule.protocol == "any"
+
+
+def test_add_route_sport_application_name_sets_sapp(client):
+    ufw.add_route(action="allow", sport="StorageApp")
+    rule = _captured_rule(client)
+    assert rule.sapp == "StorageApp"
+    assert rule.protocol == "any"
+
+
+def test_add_route_application_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_route(action="allow", dport="Storage", proto="udp")
+
+
+def test_add_route_sport_application_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_route(action="allow", sport="StorageApp", proto="tcp")
+
+
+def test_add_route_invalid_position():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_route(position=-5, action="allow", dport="8080", proto="tcp")
+
+
+def test_add_route_invalid_action():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_route(action="invalid", dport="80", proto="tcp")
+
+
+def test_add_route_missing_port_with_proto():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_route(action="allow", proto="tcp")
+
+
+def test_remove_route_basic(client):
+    ufw.remove_route(
         action="deny",
-        src="10.0.0.2",
-        direction="in",
+        interface_in="eth0",
+        interface_out="eth1",
+        sport="5353",
+        proto="udp",
     )
-    rules = ufw.get_rules(index=1)
-    assert isinstance(rules, list)
-    assert len(rules) == 1
-    rule = rules[0]
-    assert rule.get("action") == "allow"
-    assert rule.get("dport") == "29000"
-    assert rule.get("protocol") == "tcp"
-
-    rules = ufw.get_rules(index=2)
-    assert isinstance(rules, list)
-    assert len(rules) == 1
-    rule = rules[0]
-    assert rule.get("action") == "deny"
-    assert rule.get("src") == "10.0.0.2"
+    rule = _captured_rule(client)
+    assert rule.delete is True
+    assert rule.forward is True
+    assert rule.interface_in == "eth0"
+    assert rule.interface_out == "eth1"
+    assert rule.sport == "5353"
+    assert rule.protocol == "udp"
 
 
-def test_add_and_remove_route_ports(ufw):
-    initial_rules = ufw.get_rules()
-    ret = ufw.add_route(
-        action="allow",
-        src="10.10.10.1",
-        dst="10.10.10.2",
-        sport="30000",
-        dport="31000",
-        proto="tcp",
-    )
-    assert ret == "Rule added"
-    rules = ufw.get_rules()
-    assert len(rules) == len(initial_rules) + 1
-
-    assert rules[-1]["action"] == "allow"
-    assert rules[-1]["src"] == "10.10.10.1"
-    assert rules[-1]["direction"] == "forward"
-
-    ufw.remove_route(
-        action="allow",
-        src="10.10.10.1",
-        dst="10.10.10.2",
-        sport="30000",
-        dport="31000",
-        proto="tcp",
-    )
-    rules_after = ufw.get_rules()
-    assert len(rules_after) == len(initial_rules)
+def test_remove_route_sport_application_name_sets_sapp(client):
+    ufw.remove_route(action="deny", sport="CustomApp")
+    rule = _captured_rule(client)
+    assert rule.sapp == "CustomApp"
+    assert rule.protocol == "any"
 
 
-def test_add_and_remove_route_application(ufw):
-    initial_rules = ufw.get_rules()
-    ret = ufw.add_route(
-        action="allow",
-        src="192.168.99.1",
-        dst="192.168.99.2",
-        sport="openssh",
-        dport="openssh",
-    )
-    assert ret == "Rule added"
-    rules = ufw.get_rules()
-    assert len(rules) == len(initial_rules) + 1
+def test_remove_route_invalid_action():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_route(action="invalid", dport="80", proto="tcp")
 
-    assert rules[-1]["action"] == "allow"
-    assert rules[-1]["src"] == "192.168.99.1"
-    assert rules[-1]["dport"] == "22"
-    assert rules[-1]["sport"] == "22"
-    assert rules[-1]["protocol"] == "tcp"
-    assert rules[-1]["direction"] == "forward"
 
-    ufw.remove_route(
-        action="allow",
-        src="192.168.99.1",
-        dst="192.168.99.2",
-        sport="openssh",
-        dport="openssh",
-    )
-    rules_after = ufw.get_rules()
-    assert len(rules_after) == len(initial_rules)
+def test_remove_route_missing_port_with_proto():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_route(action="allow", proto="udp")
+
+
+def test_remove_route_application_name_sets_dapp(client):
+    ufw.remove_route(action="allow", dport="CustomService")
+    rule = _captured_rule(client)
+    assert rule.dapp == "CustomService"
+    assert rule.protocol == "any"
+
+
+def test_remove_route_application_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_route(action="allow", dport="CustomService", proto="tcp")
+
+
+def test_remove_route_sport_application_requires_numeric_port_when_proto_set():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_route(action="allow", sport="CustomApp", proto="udp")

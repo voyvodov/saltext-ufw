@@ -7,8 +7,6 @@ import pytest
 from saltfactories.utils import random_string
 
 from saltext.ufw import PACKAGE_ROOT
-from saltext.ufw.utils.ufw import client as ufw_client_module
-from saltext.ufw.utils.ufw import network as utilnet
 from saltext.ufw.utils.ufw import rules as utilrules
 
 # Reset the root logger to its default level(because salt changed it)
@@ -82,7 +80,7 @@ def minion(master, minion_config, minion_config_overrides):  # pragma: no cover
 
 
 @pytest.fixture()
-def ufw_client(monkeypatch, firewall_rules_file):
+def ufw_client(firewall_rules_file):
     # mock = MagicMock(spec_set=ufw_client_module.UFWClient)
     # default_cmd_response = {"stdout": "", "stderr": "", "retcode": 0}
     # mock._execute.return_value = default_cmd_response
@@ -93,10 +91,10 @@ def ufw_client(monkeypatch, firewall_rules_file):
     # # mock.get_current_rules.return_value = ""
     # mock.get_current_rules.side_effect = get_current_rules_side_effect
 
-    with patch("saltext.ufw.utils.ufw.client.UFWClient") as mocked_cls:
+    with patch("saltext.ufw.utils.ufw.UFWClient") as mocked_cls:
         mock = UFWClientMock(rules_file=firewall_rules_file)
         mocked_cls.return_value = mock
-        monkeypatch.setattr(ufw_client_module, "get_client", MagicMock(return_value=mock))
+        patch("saltext.ufw.utils.ufw.get_client", MagicMock(return_value=mock)).start()
 
         yield mock
 
@@ -127,7 +125,7 @@ class UFWClientMock:
         if rules_file is not None:
             self.mock_firewall_rules_file = rules_file
 
-    def reset(self):
+    def _reset(self):
         with open(self.mock_firewall_rules_file, "w", encoding="utf-8") as f:
             f.write("")
 
@@ -138,165 +136,123 @@ class UFWClientMock:
         except FileNotFoundError:
             pass
 
-    def execute(self, command, force=False, dry_run=False, **kwargs):
+    def set_default_policy(self, policy, direction="incoming", dry_run=False):
+        if not dry_run:
+            self.default_policy[direction] = policy
+        return {
+            "stdout": f"Default {direction} policy set to {policy}",
+            "stderr": "",
+            "retcode": 0,
+        }
 
-        ret = {}
-        if command == "status":
-            ret = {
-                "stdout": f"""Status: {self.state}
+    def set_logging_level(self, level, dry_run=False):
+        if level != "off":
+            level = f"on ({level})"
+
+        if not dry_run:
+            self.logging_level = level
+        return {
+            "stdout": f"Logging set to {level}",
+            "stderr": "",
+            "retcode": 0,
+        }
+
+    def enable(self, dry_run=False):
+        if not dry_run:
+            self.state = "active"
+        return {
+            "stdout": "Firewall is active and enabled on system startup",
+            "stderr": "",
+            "retcode": 0,
+        }
+
+    def disable(self, dry_run=False):
+        if not dry_run:
+            self.state = "inactive"
+        return {
+            "stdout": "Firewall stopped and disabled on system startup",
+            "stderr": "",
+            "retcode": 0,
+        }
+
+    def reload(self, dry_run=False):
+        if dry_run:
+            return {
+                "stdout": "",
+                "stderr": "",
+                "retcode": 0,
+            }
+
+        return {
+            "stdout": "Firewall reloaded",
+            "stderr": "",
+            "retcode": 0,
+        }
+
+    def reset(self, dry_run=False):
+        if not dry_run:
+            self._reset()
+        return {
+            "stdout": "Firewall reset to default state",
+            "stderr": "",
+            "retcode": 0,
+        }
+
+    def status(self, verbose=False, numbered=False):
+        out = f"""Status: {self.state}
     Logging: {self.logging_level}
     Default: {self.default_policy['incoming']} (incoming), {self.default_policy['outgoing']} (outgoing), {self.default_policy['routed']} (routed)
-    New profiles: skip""",
-                "stderr": "",
-                "retcode": 0,
-            }
+    New profiles: skip"""
 
-        if command == "reload":
-            ret = {
-                "stdout": "Firewall reloaded",
-                "stderr": "",
-                "retcode": 0,
-            }
+        if numbered or verbose:
+            out += "\n\nTo                         Action      From\n--                         ------      ----"
 
-        if command == "enable" and force:
-            if not dry_run:
-                self.state = "active"
-            ret = {
-                "stdout": "Firewall is active and enabled on system startup",
-                "stderr": "",
-                "retcode": 0,
-            }
+        return {
+            "stdout": out,
+            "stderr": "",
+            "retcode": 0,
+        }
 
-        if command == "disable":
-            if not dry_run:
-                self.state = "inactive"
-            ret = {
-                "stdout": "Firewall stopped and disabled on system startup",
-                "stderr": "",
-                "retcode": 0,
-            }
+    def update_rule(self, fwrule, dry_run=False):
 
-        if command == "logging":
-            level = kwargs.get("level", "off")
-            if level != "off":
-                level = f"on ({level})"
+        sapp = None
+        dapp = None
+        dport = fwrule.dport if fwrule.dport != "" else "any"
+        sport = fwrule.sport if fwrule.sport != "" else "any"
+        proto = fwrule.protocol
+        action = fwrule.action
 
-            if not dry_run:
-                self.logging_level = level
-            ret = {
-                "stdout": f"Logging set to {level}",
-                "stderr": "",
-                "retcode": 0,
-            }
+        if fwrule.forward:
+            action = f"route:{action}"
 
-        if command == "default":
-            policy = kwargs.get("policy", "deny")
-            direction = kwargs.get("direction", "incoming")
+        if fwrule.logtype != "":
+            action = f"{action}_{fwrule.logtype}"
 
-            if not dry_run:
-                self.default_policy[direction] = policy
-            ret = {
-                "stdout": f"Default {direction} policy set to {policy}",
-                "stderr": "",
-                "retcode": 0,
-            }
+        rule_line = f"### tuple ### {action} {proto} {dport} {fwrule.dst} {sport} {fwrule.src} {fwrule.direction}"
 
-        if command == "reset":
-            self.reset()
-            ret = {
-                "stdout": "Firewall reset to default state",
-                "stderr": "",
-                "retcode": 0,
-            }
+        if fwrule.dapp != "":
+            dapp = "OpenSSH"
+            dport = "22"
+            proto = "tcp"
+        if fwrule.sapp != "":
+            sapp = "OpenSSH"
+            sport = "22"
+            proto = "tcp"
 
-        if command == "rule":
-            method = kwargs.get("method") or None
-            direction = kwargs.get("direction") or "in"
-            action = kwargs.get("action") or "allow"
-            rule_log = kwargs.get("rule_log") or False
-            dport = kwargs.get("dport") or "any"
-            sport = kwargs.get("sport") or "any"
-            proto = kwargs.get("proto") or "any"
-            src = kwargs.get("src") or "0.0.0.0/0"
-            dst = kwargs.get("dst") or "0.0.0.0/0"
+        if sapp is not None or dapp is not None:
+            rule_line = f"### tuple ### {action} {proto} {dport} {fwrule.dst} {sport} {fwrule.src} {sapp or '-'} {dapp or '-'} {fwrule.direction}"
 
-            if (kwargs.get("interface") or None) is not None:
-                interface = kwargs.get("interface")
-                direction = f"{direction}_{interface}"
+        if fwrule.comment != "":
+            comment = bytes(fwrule.comment, "utf-8").hex()
+            rule_line += f" comment={comment}"
 
-            if rule_log:
-                action = f"{action}_{rule_log}"
+        # Add the final new line...
+        rule_line += "\n"
 
-            app_in = None
-            app_out = None
+        if fwrule.delete:
+            return self._delete_rule(rule_line, dry_run=dry_run)
 
-            rule_line = f"### tuple ### {action} {proto} {dport} {dst} {sport} {src} {direction}\n"
-
-            if dport != "any" and not utilnet.is_port_number(dport):
-                app_out = "OpenSSH"
-                dport = "22"
-                proto = "tcp"
-            if sport != "any" and not utilnet.is_port_number(sport):
-                app_in = "OpenSSH"
-                sport = "22"
-                proto = "tcp"
-
-            if app_in is not None or app_out is not None:
-                rule_line = f"### tuple ### {action} {proto} {dport} {dst} {sport} {src} {app_in or '-'} {app_out or '-'} {direction}\n"
-
-            if method == "delete":
-                ret = self._delete_rule(rule_line, dry_run=dry_run)
-            else:
-                ret = self._add_rule(rule_line, dry_run=dry_run)
-
-        if command == "route":
-            method = kwargs.get("method") or None
-            interface_in = kwargs.get("interface_in") or None
-            interface_out = kwargs.get("interface_out") or None
-            action = kwargs.get("action") or "allow"
-            src = kwargs.get("src") or "0.0.0.0/0"
-            dst = kwargs.get("dst") or "0.0.0.0/0"
-            dport = kwargs.get("dport") or None
-            sport = kwargs.get("sport") or None
-            proto = kwargs.get("proto") or "any"
-            rule_log = kwargs.get("rule_log") or False
-
-            if rule_log:
-                action = f"{action}_{rule_log}"
-
-            direction = ""
-            app_in = None
-            app_out = None
-            if interface_in is not None:
-                direction = f"in_{interface_in}"
-            if interface_out is not None:
-                direction = f"out_{interface_out}"
-
-            if interface_in is not None and interface_out is not None:
-                direction = f"in_{interface_in}!out_{interface_out}"
-
-            rule_line = (
-                f"### tuple ### route:{action} {proto} {dport} {dst} {sport} {src} {direction}\n"
-            )
-
-            if not utilnet.is_port_number(dport):
-                app_out = "OpenSSH"
-                dport = "22"
-                proto = "tcp"
-            if not utilnet.is_port_number(sport):
-                app_in = "OpenSSH"
-                sport = "22"
-                proto = "tcp"
-
-            if app_in is not None or app_out is not None:
-                rule_line = f"### tuple ### route:{action} {proto} {dport} {dst} {sport} {src} {app_in or '-'} {app_out or '-'} {direction}\n"
-
-            if method == "delete":
-                ret = self._delete_rule(rule_line, dry_run=dry_run)
-            else:
-                ret = self._add_rule(rule_line, dry_run=dry_run)
-
-        return ret
+        return self._add_rule(rule_line, dry_run=dry_run)
 
     def _add_rule(self, rule_line, dry_run=False):
         current_rules = utilrules.list_current_rules()

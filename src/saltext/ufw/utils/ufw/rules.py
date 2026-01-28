@@ -11,6 +11,53 @@ USER_RULES_FILES = [
 
 
 def get_firewall_rules():
+    """
+    Gets current ufw firewall rules from user.rules files
+    Returns a list of rule dictionaries. Each dictionary represents a rule.
+
+    Example non-forwarding rule:
+
+    .. code-block:: python
+
+        {
+            "action": "allow",
+            "protocol": "tcp",
+            "dport": "22",
+            "dst": "any",
+            "sport": "any",
+            "src": "any",
+            "direction": "in",
+            "interface_in": "",
+            "interface_out": "",
+            "dapp": "",
+            "sapp": "",
+            "comment": "Allow SSH on port 22",
+            "log": False,
+            "index": 1,
+        }
+
+    Example forwarding rule:
+
+    .. code-block:: python
+
+        {
+            "action": "deny",
+            "protocol": "udp",
+            "dport": "any",
+            "dst": ""
+            "sport": "any",
+            "src": "any",
+            "direction": "forward",
+            "interface_in": "eth0",
+            "interface_out": "eth1",
+            "dapp": "",
+            "sapp": "",
+            "comment": "Block all UDP forwarding from eth0 to eth1",
+            "log": "all",
+            "index": 2,
+        }
+
+    """
     pat_tuple = re.compile(r"^### tuple ###\s*")
     pat_iface_in = re.compile(r"in_\w+")
     pat_iface_out = re.compile(r"out_\w+")
@@ -109,6 +156,11 @@ def get_firewall_rules():
 
 
 def list_current_rules():
+    """
+    Lists current ufw rules from user.rules files
+    Returns a list of rule lines
+    1 line per rule
+    """
 
     pat_tuple = re.compile(r"^### tuple ###\s*")
     lines = []
