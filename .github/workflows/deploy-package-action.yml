@@ -49,7 +49,7 @@ jobs:
               dist/*
 
       - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@1bb664cc2ddedbbfdde43d4ac135d5836b7bf40f # v1.11.0
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         if: ${{ !inputs.test }}
         with:
           # Attestations are only submitted when using Trusted Publishing,
