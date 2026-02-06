@@ -52,7 +52,7 @@ def status_out(state, default_policy, log_level):
 
 
 def _captured_rule(client):
-    client.update_rule.assert_called_once()
+    client.update_rule.assert_called()
     (rule,), _ = client.update_rule.call_args
     assert isinstance(rule, FirewallRule)
     return rule
@@ -376,3 +376,83 @@ def test_remove_route_invalid_action():
 def test_remove_route_missing_port_with_proto():
     with pytest.raises(SaltInvocationError):
         ufw.remove_route(action="allow", proto="udp")
+
+
+def test_add_rule_mixed_network():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_rule(action="allow", direction="in", dport=22, src="127.0.0.1/32", dst="::1/128")
+
+    with pytest.raises(SaltInvocationError):
+        ufw.add_rule(action="allow", direction="in", dport=22, src="::1/128", dst="127.0.0.1/32")
+
+
+def test_remove_rule_mixed_network():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_rule(action="allow", direction="in", dport=22, src="127.0.0.1/32", dst="::1/128")
+
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_rule(action="allow", direction="in", dport=22, src="::1/128", dst="127.0.0.1/32")
+
+
+def test_add_route_mixed_network():
+    with pytest.raises(SaltInvocationError):
+        ufw.add_route(action="allow", dport=22, src="127.0.0.1/32", dst="::1/128")
+
+    with pytest.raises(SaltInvocationError):
+        ufw.add_route(action="allow", dport=22, src="::1/128", dst="127.0.0.1/32")
+
+
+def test_remove_route_mixed_network():
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_route(action="allow", dport=22, src="127.0.0.1/32", dst="::1/128")
+
+    with pytest.raises(SaltInvocationError):
+        ufw.remove_route(action="allow", dport=22, src="::1/128", dst="127.0.0.1/32")
+
+
+def test_rule_default_network_is_replaced_for_ipv6(client):
+    ipv6_network = "fd3b:91a3:a9b4:709e::/64"
+
+    ufw.add_rule(action="allow", direction="in", dport=22, src=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == ipv6_network
+    assert rule.dst == "::/0"
+
+    ufw.remove_rule(action="allow", direction="in", dport=22, src=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == ipv6_network
+    assert rule.dst == "::/0"
+
+    ufw.add_rule(action="allow", direction="in", dport=22, dst=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == "::/0"
+    assert rule.dst == ipv6_network
+
+    ufw.remove_rule(action="allow", direction="in", dport=22, dst=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == "::/0"
+    assert rule.dst == ipv6_network
+
+
+def test_route_default_network_is_replaced_for_ipv6(client):
+    ipv6_network = "fd3b:91a3:a9b4:709e::/64"
+
+    ufw.add_route(action="allow", sport=22, src=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == ipv6_network
+    assert rule.dst == "::/0"
+
+    ufw.remove_route(action="allow", sport=22, src=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == ipv6_network
+    assert rule.dst == "::/0"
+
+    ufw.add_route(action="allow", dport=22, dst=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == "::/0"
+    assert rule.dst == ipv6_network
+
+    ufw.remove_route(action="allow", dport=22, dst=ipv6_network)
+    rule = _captured_rule(client)
+    assert rule.src == "::/0"
+    assert rule.dst == ipv6_network

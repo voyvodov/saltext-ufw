@@ -11,7 +11,7 @@ from salt.utils.path import which
 
 from saltext.ufw.utils.ufw import FirewallRule
 from saltext.ufw.utils.ufw import get_client
-from saltext.ufw.utils.ufw.network import is_port_number
+from saltext.ufw.utils.ufw import network as netutils
 from saltext.ufw.utils.ufw.rules import get_firewall_rules
 from saltext.ufw.utils.ufw.rules import list_current_rules
 
@@ -263,7 +263,7 @@ def _check_rule_params(action, direction, dst, dport, src, sport, proto):
         for field_name, field_value in ("dport", dport), ("sport", sport):
             if field_value is None:
                 continue
-            if not is_port_number(field_value):
+            if not netutils.is_port_number(field_value):
                 raise SaltInvocationError(
                     f"When specifying a protocol, {field_name} must be a port number."
                 )
@@ -325,6 +325,20 @@ def add_rule(
 
     if logtype not in (None, "log", "log-all"):
         raise SaltInvocationError("logtype must be either 'log', 'log-all', or None.")
+
+    # Check if src and dst are both IPv4 or both IPv6. If one of them is IPv6 and the other is not, raise an error.
+    # In case one of them is IPv6 and the other is the default, convert the default to the appropriate format for IPv6.
+    if netutils.is_ipv6(src) and not netutils.is_ipv6(dst):
+        if dst == "0.0.0.0/0":
+            dst = "::/0"
+        else:
+            raise SaltInvocationError("Source is IPv6 but destination is not IPv6.")
+
+    if netutils.is_ipv6(dst) and not netutils.is_ipv6(src):
+        if src == "0.0.0.0/0":
+            src = "::/0"
+        else:
+            raise SaltInvocationError("Destination is IPv6 but source is not IPv6.")
 
     client = get_client()
 
@@ -404,6 +418,20 @@ def remove_rule(
     """
 
     _check_rule_params(action, direction, dst, dport, src, sport, proto)
+
+    # Check if src and dst are both IPv4 or both IPv6. If one of them is IPv6 and the other is not, raise an error.
+    # In case one of them is IPv6 and the other is the default, convert the default to the appropriate format for IPv6.
+    if netutils.is_ipv6(src) and not netutils.is_ipv6(dst):
+        if dst == "0.0.0.0/0":
+            dst = "::/0"
+        else:
+            raise SaltInvocationError("Source is IPv6 but destination is not IPv6.")
+
+    if netutils.is_ipv6(dst) and not netutils.is_ipv6(src):
+        if src == "0.0.0.0/0":
+            src = "::/0"
+        else:
+            raise SaltInvocationError("Destination is IPv6 but source is not IPv6.")
 
     client = get_client()
 
@@ -510,6 +538,20 @@ def add_route(
     if logtype not in (None, "log", "log-all"):
         raise SaltInvocationError("logtype must be either 'log', 'log-all', or None.")
 
+    # Check if src and dst are both IPv4 or both IPv6. If one of them is IPv6 and the other is not, raise an error.
+    # In case one of them is IPv6 and the other is the default, convert the default to the appropriate format for IPv6.
+    if netutils.is_ipv6(src) and not netutils.is_ipv6(dst):
+        if dst == "0.0.0.0/0":
+            dst = "::/0"
+        else:
+            raise SaltInvocationError("Source is IPv6 but destination is not IPv6.")
+
+    if netutils.is_ipv6(dst) and not netutils.is_ipv6(src):
+        if src == "0.0.0.0/0":
+            src = "::/0"
+        else:
+            raise SaltInvocationError("Destination is IPv6 but source is not IPv6.")
+
     rule = FirewallRule(
         action=action,
         forward=True,
@@ -594,6 +636,20 @@ def remove_route(
 
     """
     _check_rule_params(action, None, dst, dport, src, sport, proto)
+
+    # Check if src and dst are both IPv4 or both IPv6. If one of them is IPv6 and the other is not, raise an error.
+    # In case one of them is IPv6 and the other is the default, convert the default to the appropriate format for IPv6.
+    if netutils.is_ipv6(src) and not netutils.is_ipv6(dst):
+        if dst == "0.0.0.0/0":
+            dst = "::/0"
+        else:
+            raise SaltInvocationError("Source is IPv6 but destination is not IPv6.")
+
+    if netutils.is_ipv6(dst) and not netutils.is_ipv6(src):
+        if src == "0.0.0.0/0":
+            src = "::/0"
+        else:
+            raise SaltInvocationError("Destination is IPv6 but source is not IPv6.")
 
     client = get_client()
 

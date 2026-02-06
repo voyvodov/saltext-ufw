@@ -204,6 +204,56 @@ def test_route_present_adds_route_and_is_idempotent(ufw_state, ufw_module):
     assert cleanup.result is True
 
 
+def test_route_present_adds_route_and_is_idempotent_ipv6(ufw_state, ufw_module):
+    sport = _random_port()
+    dport = _random_port()
+    src = "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+    dst = "2001:0db8:85a3:0000:0000:8a2e:0370:7335"
+
+    ret = ufw_state.route_present(
+        name="add-forward-route",
+        action="allow",
+        src=src,
+        dst=dst,
+        sport=sport,
+        dport=dport,
+        proto="tcp",
+        comment="functional route test",
+    )
+    assert ret.result is True
+    assert ret.changes
+
+    rules = ufw_module.get_rules()
+    route = _find_forward_rule(rules, src=src, dst=dst, dport=dport, sport=sport)
+    assert route is not None
+    assert route["protocol"] == "tcp"
+    assert route["action"] == "allow"
+
+    ret_again = ufw_state.route_present(
+        name="add-forward-route-idempotent",
+        action="allow",
+        src=src,
+        dst=dst,
+        sport=sport,
+        dport=dport,
+        proto="tcp",
+        comment="functional route test",
+    )
+    assert ret_again.result is True
+    assert ret_again.changes == {}
+
+    cleanup = ufw_state.route_absent(
+        name="cleanup-forward-route",
+        action="allow",
+        src=src,
+        dst=dst,
+        sport=sport,
+        dport=dport,
+        proto="tcp",
+    )
+    assert cleanup.result is True
+
+
 def test_route_absent_removes_route_and_is_idempotent(ufw_state, ufw_module):
     sport = _random_port()
     dport = _random_port()
