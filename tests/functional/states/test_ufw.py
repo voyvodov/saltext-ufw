@@ -43,6 +43,22 @@ def _find_forward_rule(rules, **expected):
     return None
 
 
+def _find_access_rule(rules, **expected):
+    for rule in rules:
+        if rule.get("direction") != "in" and rule.get("direction") != "out":
+            continue
+        match = True
+        for key, value in expected.items():
+            if value is None:
+                continue
+            if str(rule.get(key)) != str(value):
+                match = False
+                break
+        if match:
+            return rule
+    return None
+
+
 def test_enabled_turns_firewall_on(ufw_state):
     ufw_state.disabled(name="ensure-ufw-disabled")
     ret = ufw_state.enabled(name="ensure-ufw-enabled")
@@ -85,7 +101,32 @@ def test_default_policy_updates_direction(ufw_state):
     assert reset.changes["new"]["policy"] == "deny"
 
 
-def test_rule_present_adds_rule_and_is_idempotent(ufw_state):
+@pytest.mark.parametrize(
+    "src,dst,expected_src,expected_dst",
+    [
+        ("10.100.100.1", "10.100.200.1", "10.100.100.1", "10.100.200.1"),
+        ("10.100.100.1/32", "10.100.200.1/32", "10.100.100.1", "10.100.200.1"),
+        ("10.32.0.0/16", "10.33.0.0/24", "10.32.0.0/16", "10.33.0.0/24"),
+        ("10.32.3.0/16", "10.33.0.15/24", "10.32.0.0/16", "10.33.0.0/24"),
+        (
+            "2001:0db8:85a3::8a2e:0370:7334",
+            "2001:0db8:85a3::8a2e:0370:7335",
+            "2001:db8:85a3::8a2e:370:7334",
+            "2001:db8:85a3::8a2e:370:7335",
+        ),
+        (
+            "2001:0db8:85a3::8a2e:0370:7334/128",
+            "2001:0db8:85a3::8a2e:0370:7335/128",
+            "2001:db8:85a3::8a2e:370:7334",
+            "2001:db8:85a3::8a2e:370:7335",
+        ),
+        ("2001:0db8:85a3::/48", "2001:0db8:85a4::/48", "2001:db8:85a3::/48", "2001:db8:85a4::/48"),
+        ("2002::1234:abcd:ffff:c0a8:101/64", "fe80::1/64", "2002:0:0:1234::/64", "fe80::/64"),
+    ],
+)
+def test_rule_present_adds_rule_and_is_idempotent(
+    ufw_state, ufw_module, src, dst, expected_src, expected_dst
+):
     port = _random_port()
 
     ret = ufw_state.rule_present(
@@ -93,16 +134,23 @@ def test_rule_present_adds_rule_and_is_idempotent(ufw_state):
         action="allow",
         direction="in",
         dport=port,
+        src=src,
+        dst=dst,
         proto="tcp",
     )
     assert ret.result is True
     assert ret.changes
+    rules = ufw_module.get_rules()
+    route = _find_access_rule(rules, src=expected_src, dst=expected_dst, dport=port)
+    assert route is not None
 
     ret_again = ufw_state.rule_present(
         name=f"allow-port-{port}-is-idempotent",
         action="allow",
         direction="in",
         dport=port,
+        src=src,
+        dst=dst,
         proto="tcp",
     )
     assert ret_again.result is True
@@ -154,11 +202,34 @@ def test_rule_absent_requires_port_when_proto_set(ufw_state):
     assert "proto" in ret.comment
 
 
-def test_route_present_adds_route_and_is_idempotent(ufw_state, ufw_module):
+@pytest.mark.parametrize(
+    "src,dst,expected_src,expected_dst",
+    [
+        ("10.100.100.1", "10.100.200.1", "10.100.100.1", "10.100.200.1"),
+        ("10.100.100.1/32", "10.100.200.1/32", "10.100.100.1", "10.100.200.1"),
+        ("10.32.0.0/16", "10.33.0.0/24", "10.32.0.0/16", "10.33.0.0/24"),
+        ("10.32.3.0/16", "10.33.0.15/24", "10.32.0.0/16", "10.33.0.0/24"),
+        (
+            "2001:0db8:85a3::8a2e:0370:7334",
+            "2001:0db8:85a3::8a2e:0370:7335",
+            "2001:db8:85a3::8a2e:370:7334",
+            "2001:db8:85a3::8a2e:370:7335",
+        ),
+        (
+            "2001:0db8:85a3::8a2e:0370:7334/128",
+            "2001:0db8:85a3::8a2e:0370:7335/128",
+            "2001:db8:85a3::8a2e:370:7334",
+            "2001:db8:85a3::8a2e:370:7335",
+        ),
+        ("2001:0db8:85a3::/48", "2001:0db8:85a4::/48", "2001:db8:85a3::/48", "2001:db8:85a4::/48"),
+        ("2002::1234:abcd:ffff:c0a8:101/64", "fe80::1/64", "2002:0:0:1234::/64", "fe80::/64"),
+    ],
+)
+def test_route_present_adds_route_and_is_idempotent(
+    ufw_state, ufw_module, src, dst, expected_src, expected_dst
+):
     sport = _random_port()
     dport = _random_port()
-    src = "10.100.100.1"
-    dst = "10.100.200.1"
 
     ret = ufw_state.route_present(
         name="add-forward-route",
@@ -174,57 +245,7 @@ def test_route_present_adds_route_and_is_idempotent(ufw_state, ufw_module):
     assert ret.changes
 
     rules = ufw_module.get_rules()
-    route = _find_forward_rule(rules, src=src, dst=dst, dport=dport, sport=sport)
-    assert route is not None
-    assert route["protocol"] == "tcp"
-    assert route["action"] == "allow"
-
-    ret_again = ufw_state.route_present(
-        name="add-forward-route-idempotent",
-        action="allow",
-        src=src,
-        dst=dst,
-        sport=sport,
-        dport=dport,
-        proto="tcp",
-        comment="functional route test",
-    )
-    assert ret_again.result is True
-    assert ret_again.changes == {}
-
-    cleanup = ufw_state.route_absent(
-        name="cleanup-forward-route",
-        action="allow",
-        src=src,
-        dst=dst,
-        sport=sport,
-        dport=dport,
-        proto="tcp",
-    )
-    assert cleanup.result is True
-
-
-def test_route_present_adds_route_and_is_idempotent_ipv6(ufw_state, ufw_module):
-    sport = _random_port()
-    dport = _random_port()
-    src = "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
-    dst = "2001:0db8:85a3:0000:0000:8a2e:0370:7335"
-
-    ret = ufw_state.route_present(
-        name="add-forward-route",
-        action="allow",
-        src=src,
-        dst=dst,
-        sport=sport,
-        dport=dport,
-        proto="tcp",
-        comment="functional route test",
-    )
-    assert ret.result is True
-    assert ret.changes
-
-    rules = ufw_module.get_rules()
-    route = _find_forward_rule(rules, src=src, dst=dst, dport=dport, sport=sport)
+    route = _find_forward_rule(rules, src=expected_src, dst=expected_dst, dport=dport, sport=sport)
     assert route is not None
     assert route["protocol"] == "tcp"
     assert route["action"] == "allow"

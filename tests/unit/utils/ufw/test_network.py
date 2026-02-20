@@ -191,3 +191,50 @@ class TestIsStartingByIPv6:
         """Test link-local IPv6 addresses"""
         assert network.is_ipv6("fe80::1") is True
         assert network.is_ipv6("fe80::") is True
+
+
+class TestIsPortNumber:
+    def test_valid_single_port_returns_true(self):
+        """Test that valid single port numbers return True"""
+        assert network.is_port_number(80) is True
+        assert network.is_port_number("80") is True
+        assert network.is_port_number(1) is True
+        assert network.is_port_number(65535) is True
+        assert network.is_port_number("443") is True
+
+    def test_valid_port_range_returns_true(self):
+        """Test that valid port ranges return True"""
+        assert network.is_port_number("80:443") is True
+        assert network.is_port_number("1:65535") is True
+        assert network.is_port_number("8000:9000") is True
+        assert network.is_port_number("100:100") is True
+
+    def test_invalid_port_number_returns_false(self):
+        """Test that invalid port numbers return False"""
+        assert network.is_port_number(0) is False
+        assert network.is_port_number(65536) is False
+        assert network.is_port_number(-1) is False
+        assert network.is_port_number("70000") is False
+
+    def test_invalid_port_range_returns_false(self):
+        """Test that invalid port ranges return False"""
+        assert network.is_port_number("443:80") is False
+        assert network.is_port_number("0:100") is False
+        assert network.is_port_number("100:65536") is False
+        assert network.is_port_number("100:0") is False
+
+    def test_invalid_format_returns_false(self):
+        """Test that invalid formats return False"""
+        assert network.is_port_number("not a port") is False
+        assert network.is_port_number("80:443:8080") is False
+        assert network.is_port_number("80-443") is False
+        assert network.is_port_number("") is False
+        assert network.is_port_number(None) is False
+        assert network.is_port_number("80:") is False
+        assert network.is_port_number(":80") is False
+
+    def test_port_with_non_numeric_returns_false(self):
+        """Test that ports with non-numeric characters return False"""
+        assert network.is_port_number("80a") is False
+        assert network.is_port_number("a80") is False
+        assert network.is_port_number("80.5") is False
