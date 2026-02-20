@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import re
 
@@ -167,8 +168,8 @@ class FirewallRule:  # pylint: disable=too-many-instance-attributes
         comment="",
     ):
         self.delete = False
-        self.dst = dst
-        self.src = src
+        self.dst = ""
+        self.src = ""
         self.dport = ""
         self.sport = ""
         self.protocol = ""
@@ -182,6 +183,9 @@ class FirewallRule:  # pylint: disable=too-many-instance-attributes
         self.logtype = ""
         self.comment = ""
         self.protocol = protocol
+
+        self.set_ip(dst, "dst")
+        self.set_ip(src, "src")
 
         self.set_action(action)
         self.set_direction(direction)
@@ -201,6 +205,42 @@ class FirewallRule:  # pylint: disable=too-many-instance-attributes
 
         if len(tmp) > 1:
             self.set_logtype(tmp[1])
+
+    def set_ip(self, ip, loc="dst"):
+        """
+        Sets IP address for source or destination
+
+        This function will check if the IP address is a valid IPv4 or IPv6 address.
+
+        ip
+            The IP address in CIDR notation or "any".
+
+        loc
+            The location of the IP address, either 'src' or 'dst'.
+        """
+        try:
+            ip_net = ipaddress.ip_network(
+                ip, strict=False
+            )  # This will raise ValueError if the IP is not valid
+            ip_with_prefixlen = ip_net.with_prefixlen
+
+            # This is edge case handling for single host IP addresses in CIDR notation (e.g. 192.168.1.1/32 or ::1/128)
+            if ip_net.prefixlen == ip_net.max_prefixlen:
+                # If the IP address is a single host, we can just use the IP address without CIDR notation
+                ip_address = ipaddress.ip_interface(ip).ip.compressed
+                ip_with_prefixlen = ip_address
+
+            if loc == "src":
+                self.src = ip_with_prefixlen
+            else:
+                self.dst = ip_with_prefixlen
+        except ValueError:
+            # If the IP is not valid we'll just set it as is and let UFW handle the error
+            # or validation function
+            if loc == "src":
+                self.src = ip
+            else:
+                self.dst = ip
 
     def set_logtype(self, logtype):
         """Sets logtype of the rule
@@ -397,29 +437,44 @@ def rules_match(x, y):  # pylint: disable=too-many-return-statements
     - ``1`` - no match
     - ``-1`` - match all but action, log-type and/or comment
     """
+    log.debug(
+        "Comparing rules:\nRule 1: %s\nRule 2: %s", x.build_rule_string(), y.build_rule_string()
+    )
     if x.dport != y.dport:
+        log.debug("Destination port mismatch: %s != %s", x.dport, y.dport)
         return 1
     if x.sport != y.sport:
+        log.debug("Source port mismatch: %s != %s", x.sport, y.sport)
         return 1
     if x.protocol != y.protocol:
+        log.debug("Protocol mismatch: %s != %s", x.protocol, y.protocol)
         return 1
     if x.dst != y.dst:
+        log.debug("Destination IP mismatch: %s != %s", x.dst, y.dst)
         return 1
     if x.src != y.src:
+        log.debug("Source IP mismatch: %s != %s", x.src, y.src)
         return 1
     if x.dapp.lower() != y.dapp.lower():
+        log.debug("Destination application mismatch: %s != %s", x.dapp, y.dapp)
         return 1
     if x.sapp.lower() != y.sapp.lower():
+        log.debug("Source application mismatch: %s != %s", x.sapp, y.sapp)
         return 1
     if x.interface_in != y.interface_in:
+        log.debug("Input interface mismatch: %s != %s", x.interface_in, y.interface_in)
         return 1
     if x.interface_out != y.interface_out:
+        log.debug("Output interface mismatch: %s != %s", x.interface_out, y.interface_out)
         return 1
     if x.direction != y.direction:
+        log.debug("Direction mismatch: %s != %s", x.direction, y.direction)
         return 1
     if x.forward != y.forward:
+        log.debug("Forwarding mismatch: %s != %s", x.forward, y.forward)
         return 1
     if x.action == y.action and x.logtype == y.logtype and x.comment == y.comment:
+        log.debug("Rules match")
         return 0
 
     log.debug("Action, logtype or comment mismatch")

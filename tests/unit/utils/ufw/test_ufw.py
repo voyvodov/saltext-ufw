@@ -42,6 +42,28 @@ class TestFirewallRuleBuilding:
             == "rule allow proto tcp from 10.0.0.1 port 53 to 10.0.0.2 port 22"
         )
 
+    @pytest.mark.parametrize(
+        "src,dst,expected_src,expected_dst",
+        [
+            ("192.168.3.0/23", "192.168.0.1/24", "192.168.2.0/23", "192.168.0.0/24"),
+            ("2002::1234:abcd:ffff:c0a8:101/64", "fe80::1/64", "2002:0:0:1234::/64", "fe80::/64"),
+            ("192.168.0.0/24", "10.0.0.0/8", "192.168.0.0/24", "10.0.0.0/8"),
+            ("2002:0:0:1234::/64", "2001:db8::/32", "2002:0:0:1234::/64", "2001:db8::/32"),
+        ],
+    )
+    def test_rule_with_wrong_subnets(self, src, dst, expected_src, expected_dst):
+        rule = FirewallRule(
+            action="allow",
+            protocol="tcp",
+            dst=dst,
+            src=src,
+        )
+
+        assert (
+            rule.build_rule_string()
+            == f"rule allow proto tcp from {expected_src} to {expected_dst}"
+        )
+
     def test_build_route_rule_includes_interfaces_and_comment(self):
         rule = FirewallRule(
             action="deny_log",
