@@ -4,6 +4,21 @@ This project uses [Semantic Versioning](https://semver.org/) - MAJOR.MINOR.PATCH
 
 # Changelog
 
+## 0.8.3 (2026-02-20)
+
+
+### Fixed
+
+- Adding wrong network subnet will be now fixed to match UFW behavior
+  Example:
+  Adding 192.168.0.1/24, but ufw will add the correct subnet 192.168.0.0/24 instead.
+  This is leading to non-matching during state apply. This is now fixed and we convert them during FirewallRule creation.
+
+
+### Added
+
+- Added debug logging for rule matching for easier debugging in case of rules applied over and over again
+
 ## 0.8.2 (2026-01-29)
 
 
