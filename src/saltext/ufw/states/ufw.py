@@ -847,7 +847,7 @@ def route_present(
                 ret["result"] = False
                 ret["comment"] = "Failed to add UFW route rule."
                 return ret
-            ret["comment"] = "The route rulehas been added."
+            ret["comment"] = "The route rule has been added."
             return ret
         except SaltException as err:
             ret["result"] = False
